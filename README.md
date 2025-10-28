@@ -29,7 +29,7 @@ A production-ready Unity puzzle framework demonstrating advanced procedural gene
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/puzzleforge.git
+git clone https://github.com/kocyunus/puzzleforge.git
 cd puzzleforge
 # Open in Unity Hub
 ```
