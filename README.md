@@ -58,6 +58,19 @@ cd puzzleforge
 
 ---
 
+## ⚙️ Level Selection & Difficulty
+
+You can easily change the difficulty level and select specific levels through the **LevelManager** Inspector:
+
+1. **Select Main Camera** in scene hierarchy
+2. **Find LevelManager component** in Inspector
+3. **Change "Selected Difficulty":** Easy, Medium, or Hard
+4. **Optional - Play Specific Level:** Set "Specific Level Id" to play a particular level (e.g., "easy-1", "hard-3")
+
+![Level Selection in Inspector](Recordings/Movie_001.gif)
+
+---
+
 ## 🏗️ Architecture Overview
 
 ### Directory Structure
