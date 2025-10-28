@@ -939,7 +939,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a714f4d4593b14841a59984a5d22cd8a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  trianglePrefab: {fileID: 2549805869817484654, guid: 6ad53af0b0ba41e44babb99b9a990dfd, type: 3}
+  trianglePrefab: {fileID: 3905469526827683575, guid: e2f467a434bcea44892c5187c110e01f, type: 3}
   baseColor: {r: 0.75, g: 0.75, b: 0.75, a: 1}
   placedPieceCount: 0
   totalPiecesNeeded: 5
@@ -1096,7 +1096,7 @@ MonoBehaviour:
   localJsonFile: {fileID: 4900000, guid: b012fbb5ec8672a499a927679c57bfd5, type: 3}
   downloadFromServer: 0
   serverUrl: https://drive.google.com/uc?export=download&id=YOUR_FILE_ID
-  selectedDifficulty: medium
+  selectedDifficulty: easy
   specificLevelId: 
 --- !u!4 &1793075547
 Transform:
@@ -1189,7 +1189,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 26016e6e6e6f31643881c6138915340a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  trianglePrefab: {fileID: 2549805869817484654, guid: 6ad53af0b0ba41e44babb99b9a990dfd, type: 3}
+  trianglePrefab: {fileID: 6290922955707900684, guid: 6ad53af0b0ba41e44babb99b9a990dfd, type: 3}
   shapePrefab: {fileID: 5283052281559508290, guid: 3d3d4f8cea061cb449b8df8d656cbc93, type: 3}
 --- !u!4 &2131151309
 Transform:
