@@ -38,13 +38,13 @@ cd puzzleforge
 
 ## 🎥 Gameplay Demonstrations
 
-### Easy Demo
+### Demo
 ![Easy Gameplay](Recordings/Movie_001.gif)
 
-### Medium Demo
+### Demo
 ![Medium Gameplay](Recordings/Movie_003.gif)
 
-### Hard Demo
+### Demo
 ![Hard Gameplay](Recordings/Movie_004.gif)
 
 ---
