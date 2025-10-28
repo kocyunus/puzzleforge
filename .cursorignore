@@ -1,0 +1,43 @@
+# ========== EXCLUDE LARGE DIRECTORIES ==========
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+obj/
+bin/
+
+# ========== EXCLUDE GENERATED FILES ==========
+*.log
+Logs/
+
+# ========== EXCLUDE VENDOR/THIRD-PARTY ==========
+Packages/
+node_modules/
+
+# ========== EXCLUDE BUILD ARTIFACTS ==========
+*.csproj
+*.unityproj
+*.sln
+*.dll
+*.exe
+
+# ========== EXCLUDE EDITOR CONFIG FILES ==========
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ========== EXCLUDE OS FILES ==========
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========== EXCLUDE IDE TEMPORARY ==========
+.vscode-test/
+.idea_modules/
+
+# ========== KEEP RELEVANT SOURCE CODE ==========
+# All source files are included by default
+# These patterns are just exclusions

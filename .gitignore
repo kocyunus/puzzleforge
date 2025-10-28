@@ -1,0 +1,134 @@
+# ========== UNITY DEFAULTS ==========
+# Unity Editor
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Packages/
+Logs/
+
+# Visual Studio cache/options
+.vs/
+.vscode/
+*.pidb
+*.sln.iml
+
+# Rider
+.idea/
+.idea_modules/
+*.swp
+*.swo
+*~
+
+# Visual Studio Code
+.vscode
+.vscode/
+
+# Resharper
+_ReSharper*/
+*.csproj.user
+
+# ========== PROJECT GENERATED FILES ==========
+*.csproj
+*.unityproj
+*.sln
+*.unitypackage
+*.user
+*.userprefs
+
+# ========== BUILD OUTPUT ==========
+bin/
+obj/
+dist/
+
+# ========== PLATFORM SPECIFIC ==========
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+*.lnk
+desktop.ini
+
+# Linux
+.directory
+
+# ========== EDITOR CONFIGS ==========
+.vsconfig
+EditorBuildSettings.asset
+Packages/packages-lock.json
+
+# ========== LOGS ==========
+*.log
+
+# ========== OS FILES ==========
+ehthumbs.db
+
+# ========== LOCAL DEVELOPMENT ==========
+.env
+.env.local
+*.swp
+*.swo
+*~
+
+# ========== VSCODE EXTENSIONS ==========
+.vscode-test/
+
+# ========== CRASH DUMPS ==========
+*.stackdump
+
+# ========== PDB DEBUG INFO ==========
+*.pdb
+
+# ========== OPTIONAL CMAKE STUFF ==========
+CMakeFiles
+cmake_install.cmake
+CMakeCache.txt
+
+# ========== DOTNET CORE ==========
+project.lock.json
+project.fragment.lock.json
+artifacts/
+*.nuget.props
+*.nuget.targets
+
+# ========== JETBRAINS IDEs ==========
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# ========== MONODEVELOP ==========
+*.pidb
+*.userprefs
+
+# ========== NUGET PACKAGES DIRECTORY ==========
+packages/
+
+# ========== VISUAL STUDIO TEMPORARY BUILDS ==========
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+
+# ========== UNITY GENERATED FILES ==========
+*.meta
+!Assets/**/*.meta
+!ProjectSettings/**/*.meta
+
+# Keep version and specific configs
+!ProjectSettings/ProjectVersion.txt
+!ProjectSettings/ProjectSettings.asset
+
+# ========== EXCLUDES ==========
+# Don't ignore these:
+!Assets/
+!Assets/**
+!ProjectSettings/ProjectVersion.txt
+!ProjectSettings/ProjectSettings.asset

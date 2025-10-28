@@ -1,0 +1,85 @@
+{
+  "levels": [
+    {
+      "levelId": "level-1",
+      "difficulty": "easy",
+      "gridWidth": 4,
+      "gridHeight": 4,
+      "shapeCount": 5,
+      "minTrianglesPerBox": 4,
+      "seedMinCellDistance": 1
+    },
+    {
+      "levelId": "level-2",
+      "difficulty": "easy",
+      "gridWidth": 4,
+      "gridHeight": 4,
+      "shapeCount": 6,
+      "minTrianglesPerBox": 4,
+      "seedMinCellDistance": 1
+    },
+    {
+      "levelId": "level-3",
+      "difficulty": "easy",
+      "gridWidth": 4,
+      "gridHeight": 4,
+      "shapeCount": 7,
+      "minTrianglesPerBox": 4,
+      "seedMinCellDistance": 1
+    },
+    {
+      "levelId": "level-4",
+      "difficulty": "medium",
+      "gridWidth": 5,
+      "gridHeight": 5,
+      "shapeCount": 7,
+      "minTrianglesPerBox": 4,
+      "seedMinCellDistance": 2
+    },
+    {
+      "levelId": "level-5",
+      "difficulty": "medium",
+      "gridWidth": 5,
+      "gridHeight": 5,
+      "shapeCount": 8,
+      "minTrianglesPerBox": 4,
+      "seedMinCellDistance": 2
+    },
+    {
+      "levelId": "level-6",
+      "difficulty": "medium",
+      "gridWidth": 5,
+      "gridHeight": 5,
+      "shapeCount": 9,
+      "minTrianglesPerBox": 4,
+      "seedMinCellDistance": 2
+    },
+    {
+      "levelId": "level-7",
+      "difficulty": "hard",
+      "gridWidth": 6,
+      "gridHeight": 6,
+      "shapeCount": 10,
+      "minTrianglesPerBox": 3,
+      "seedMinCellDistance": 2
+    },
+    {
+      "levelId": "level-8",
+      "difficulty": "hard",
+      "gridWidth": 6,
+      "gridHeight": 6,
+      "shapeCount": 11,
+      "minTrianglesPerBox": 2,
+      "seedMinCellDistance": 1
+    },
+    {
+      "levelId": "level-9",
+      "difficulty": "hard",
+      "gridWidth": 6,
+      "gridHeight": 6,
+      "shapeCount": 12,
+      "minTrianglesPerBox": 2,
+      "seedMinCellDistance": 1
+    }
+  ]
+}
