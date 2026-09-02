@@ -1,679 +1,361 @@
 # PuzzleForge 🧩
 
-**Procedurally generated puzzle games engine** - Guaranteed-solvable, always different.
+**A procedural "fill-the-grid" puzzle for Unity — every level is a different, always-solvable
+triangle-tiling.**
 
-A compact Unity puzzle project demonstrating procedural generation, a service-locator architecture, object pooling, and a dependency-free triangle mesh renderer. It is a playable vertical slice and a reference implementation for grid-based puzzle generation — not a shipping product (no audio, minimal UI; see [Known Limitations](#-known-limitations)).
+PuzzleForge generates a grid, partitions it into coloured shapes, scatters those shapes around
+the board, and asks the player to drag them back so they tile the grid exactly. The generator
+is the interesting part: it guarantees full grid coverage and a valid solution *by
+construction*, and a run is fully reproducible from a single seed.
 
----
+It is a **playable vertical slice + reference implementation**, not a shipping game — there is
+no audio, no menu, and the UI is a single "level complete" panel. See
+[Known Limitations](#-known-limitations).
 
-## 🎯 Core Features
-
-- **✨ Procedural Generation:** 100% different layouts every run
-- **✅ Guaranteed Solvable:** Mathematical guarantees ensure every level is winnable
-- **🎮 Drag & Drop Gameplay:** Intuitive shape-snapping puzzle mechanics
-- **📊 Configurable Difficulty:** Easy, Medium, Hard with JSON-based level definitions
-- **⚡ Optimized Performance:** Object pooling, O(1) grid-registry lookups, incremental ownership tracking
-- **🏗️ Clean Architecture:** Service locator pattern with clear separation of concerns
-- **🔄 Multi-Seed Shape Synthesis:** Balanced, distributed shape generation
-- **🎨 Custom Rendering:** Zero external asset dependencies - custom triangle mesh renderer
+- Unity **2022.3 LTS** (developed on 2022.3.62f3), built-in render pipeline, C# 9
+- ~2.7k lines of runtime C# across 28 files, plus EditMode + PlayMode test suites
 
 ---
 
-## 🚀 Quick Start
+## 🎥 Demos
 
-### Prerequisites
-- Unity 2022.3+
-- C# 9.0+
-- Visual Studio or Rider
+| Easy (4×4) | Medium (5×5) | Hard (6×6) |
+|---|---|---|
+| ![Easy](Recordings/Movie_001.gif) | ![Medium](Recordings/Movie_003.gif) | ![Hard](Recordings/Movie_004.gif) |
 
-### Installation
+---
+
+## 🚀 Run it
 
 ```bash
 git clone https://github.com/kocyunus/puzzleforge.git
-cd puzzleforge
-# Open in Unity Hub
+```
+
+Open the folder in Unity Hub (2022.3.x), open `Assets/Scenes/Game.unity`, press Play.
+Package resolution and the Test Framework come from the committed `Packages/manifest.json`.
+
+---
+
+## 🎮 How it plays
+
+1. A grey **board** (the target grid) sits in the middle; the generated **shapes** are
+   scattered above it.
+2. Click a shape, drag it over the board.
+3. Release near the matching slots — if every triangle of the shape lines up with a free,
+   same-orientation board slot, it snaps into place.
+4. Place all shapes (they tile the board exactly) → the level-complete panel appears →
+   **Next Level** generates a fresh one.
+
+Input is mouse-only, through the legacy `Input` manager.
+
+---
+
+## 🧭 Runtime flow
+
+```
+GameBootstrap (Awake)
+  └─ registers services on the ServiceLocator:
+       IColorPalette   → DistinctColorPalette (from the ColorPaletteSO on GameBootstrap)
+       IPrefabPooler   → PrefabPoolerService
+       IShapeScatter   → ShapeScatterService
+
+LevelManager.Start()  ── coroutine ──────────────────────────────────────────────
+  1. Load Assets/levels.json  (local TextAsset, or UnityWebRequest with local fallback)
+  2. Select a level            (random of Selected Difficulty, or Specific Level Id)
+  3. LevelGenerator.GenerateLevel(level)
+       ├─ GridBuilder.BuildGrid()            → W×H cells × 4 triangles (the play grid)
+       ├─ ShapeGenerator.GenerateShapes()    → partition the grid into `shapeCount` shapes
+       └─ IShapeScatter.Scatter(...)         → lay the shapes out in a band above the board
+  4. PuzzleBoard.Initialize(level)
+       └─ builds a SECOND identical grid (the grey "solution grid"), sets totalPiecesNeeded
+
+DragTriangleParentInput  (per drag-release)
+  └─ SnapUtil.TrySnapToBoard(...)  → on success PuzzleBoard.OnShapePlaced()
+
+PuzzleBoard.IsPuzzleComplete  (placedPieceCount >= shapeCount)
+  └─ LevelCompleteUI.Show()
 ```
 
 ---
 
-## 🎥 Gameplay Demonstrations
+## 🏗️ Project layout
 
-### Demo
-![Easy Gameplay](Recordings/Movie_001.gif)
+### Assemblies
 
-### Demo
-![Medium Gameplay](Recordings/Movie_003.gif)
+| Assembly | Contents |
+|---|---|
+| `PuzzleForge.Runtime` | everything under `Assets/_scripts/Runtime/` (refs `Unity.Mathematics`, `PuzzleForge.Generation.Seeding`) |
+| `PuzzleForge.Generation.Seeding` | just `SeedCellSelector` — a pure, engine-light leaf assembly so it can be unit-tested directly |
+| `PuzzleForge.Tests.EditMode` | `SeedCellSelectorTests` |
+| `PuzzleForge.Tests.PlayMode` | `ShapeGenerationTests` (drives the real `GridBuilder` / `ShapeGenerator`) |
 
-### Demo
-![Hard Gameplay](Recordings/Movie_004.gif)
+### Scripts
 
----
-
-## 🎮 How to Play
-
-1. **Select a Shape** - Click on any colored shape
-2. **Drag the Shape** - Move it over the grey puzzle board
-3. **Place & Snap** - Release near the matching slots to snap into position
-4. **Complete Level** - Place all shapes (they tile the board exactly) to win
-
----
-
-## ⚙️ Level Selection & Difficulty
-
-Difficulty and level choice live on the **LevelManager** object's Inspector:
-
-1. In the scene hierarchy select the **LevelManager** object
-2. Set **Selected Difficulty** to `easy`, `medium`, or `hard` — on Play a random level of that tier is generated
-3. Optional: set **Specific Level Id** (e.g. `level-3`, `level-7`) to always load that exact level instead
-
-Level ids are `level-1` … `level-9`, three per difficulty (see `Assets/levels.json`).
-
-
----
-
-## 🏗️ Architecture Overview
-
-### Directory Structure
 ```
 Assets/_scripts/Runtime/
-├── Composition/        # Service bootstrap
-├── Core/              # Interfaces & abstractions
-├── Data/              # ScriptableObjects
-├── Domain/            # Value types & logic
-├── Gameplay/          
-│   ├── Boards/       # PuzzleBoard management
-│   ├── Components/   # Triangle, ShapeData, TriangleMeshRenderer
-│   ├── Input/        # Drag & drop input
-│   └── Snapping/     # Snap-to-grid algorithm
-├── Generation/        
-│   ├── Grid/         # GridBuilder
-│   ├── Seeding/      # SeedCellSelector (pure, unit-tested)
-│   └── Shapes/       # ShapeGenerator, NeighborSelector
-├── Level/            # Level loading
-├── Services/         # Infrastructure (pooling, etc)
-└── Ui/               # Minimal UI
+├── Composition/   GameBootstrap, ServiceLocator
+├── Core/          IService / ITickable / IPrefabPool(er) / IShapeScatter, GameLog
+├── Data/          ColorPaletteSO  (Create ▸ Game ▸ Color Palette)
+├── Domain/        IColorPalette, Rgba, DistinctColorPalette
+├── Gameplay/
+│   ├── Boards/       PuzzleBoard          (solution grid + win state)
+│   ├── Components/   Triangle, ShapeData, TriangleMeshRenderer, SimpleTriangleColor.shader
+│   ├── Input/        DragTriangleParentInput
+│   └── Snapping/     SnapUtil
+├── Generation/
+│   ├── Grid/         GridBuilder
+│   ├── Seeding/      SeedCellSelector     (own assembly)
+│   └── Shapes/       ShapeGenerator, NeighborSelector
+├── Level/         LevelData, LevelGenerator, LevelManager
+├── Services/      PrefabPoolerService, ShapeScatterService, (DistinctColorPalette)
+└── Ui/            LevelCompleteUI
 
-Assets/_scripts/Runtime/     # PuzzleForge.Runtime.asmdef
-
-Assets/Tests/
-├── EditMode/          # SeedCellSelector unit tests
-└── PlayMode/          # ShapeGenerator coverage / partition tests
+Assets/Tests/{EditMode,PlayMode}/
 ```
 
-### Key Design Patterns
+### Scene (`Assets/Scenes/Game.unity`)
 
-| Pattern | Location | Purpose |
-|---------|----------|---------|
-| **Service Locator** | `Composition/` | Global service registry |
-| **Object Pooling** | `Services/Pooling/` | Reuse objects efficiently |
-| **Factory Pattern** | `Generation/` | Shape creation |
-| **Strategy Pattern** | `Generation/Shapes/` | Neighbor selection rules |
-| **Component-Based** | `Gameplay/` | Entity-component design |
+| Group | Objects |
+|---|---|
+| `---Systems` | **GameBootstrap**, **LevelManager**, **LevelGenerator** |
+| `---Cameras` | Main Camera |
+| `---Gameplay` | **PuzzleBoard** |
+| `---Ui` | LevelCompleteUI, Panel, TMP text, EventSystem |
+| `---Input` | **DragInput** (`DragTriangleParentInput`) |
 
----
+### Prefabs (`Assets/prefab/`)
 
-## 🧠 Algorithm Deep Dive
-
-### 0. Grid Structure (Visual Reference)
-
-Each puzzle uses a grid of squares, where each square contains exactly 4 triangles (Up, Right, Down, Left):
-
-![Grid Structure Diagram](docs/grid-structure.png)
-
-**posIndex mapping:**
-- `1` = Up (↑)
-- `2` = Right (→)
-- `3` = Left (←)
-- `4` = Down (↓)
-
-This position-based indexing is crucial for the entry/exit door logic during shape expansion.
+| Prefab | Used by | Notes |
+|---|---|---|
+| `Triangle.prefab` | `LevelGenerator` | playable piece triangle — `Triangle` + `TriangleMeshRenderer` + `PolygonCollider2D` |
+| `BGTriangle.prefab` | `PuzzleBoard` | same components; used as a grey board slot |
+| `ShapePrefab.prefab` | `LevelGenerator` | shape root — carries `ShapeData` only |
 
 ---
 
-### 1. Multi-Seed Shape Generation (BFS-based)
+## 🧠 Generation algorithm
 
-**Problem:** Generate balanced, non-overlapping shapes that fill 100% of grid.
+### Grid structure
 
-**Solution:** Distributed seed placement + turn-based expansion with priority rules.
+Each cell is a square of **4 triangles** keyed by `posIndex`:
 
-#### Seed Distribution Strategy
+![Grid structure](docs/grid-structure.png)
 
-Cell choice lives in `SeedCellSelector` — a pure, unit-tested class with **no
-`MonoBehaviour` dependency**. It always returns exactly `min(shapeCount, cellCount)`
-distinct in-bounds cells, so generation can never stall or crash on a tight config.
+```
+posIndex   1 = Up (↑)   2 = Right (→)   3 = Left (←)   4 = Down (↓)
+```
+
+`GridBuilder` spawns `W × H` cells (each dimension clamped to **4–6**), so a grid has
+`W × H × 4` triangles — 64 to 144. `GridBuilder.TriangleRegistry` is a
+`Dictionary<long, Triangle>` keyed by `(x, y, posIndex)` for O(1) lookup.
+
+### 1 · Seed placement — `SeedCellSelector.Select(...)`
 
 ```csharp
 public static List<Vector2Int> Select(
     int gridWidth, int gridHeight, int shapeCount,
     int minCellDistance, bool preSeedCorners, System.Random rng)
-{
-    int target = Clamp(shapeCount, 0, gridWidth * gridHeight);
-
-    // Step 1: pre-seed up to 4 corners (natural starting points)
-    if (preSeedCorners) TakeCorners(chosen, target);
-
-    // Step 2: greedy "far-first" fill at the requested distance, then
-    //         relax the distance step-by-step (d, d-1, ... 0)
-    for (int d = minCellDistance; d >= 0 && chosen.Count < target; d--)
-        FillGreedy(chosen, edges, centers, phase, d, target);
-
-    // Step 3: last resort - take any remaining free cell
-    if (chosen.Count < target) FillAnyRemaining(chosen, target);
-
-    return chosen;
-}
 ```
 
-`ShapeGenerator` just resolves each chosen cell to a concrete triangle:
+Pure function, no `MonoBehaviour`. **Guarantee: it always returns exactly
+`min(shapeCount, gridWidth * gridHeight)` distinct, in-bounds cells.**
+
+1. Pre-seed up to 4 corners.
+2. Greedy *far-first* fill: repeatedly take the candidate (from edge/centre cells, phase-
+   alternating) that is `minCellDistance` (Chebyshev) from everything chosen and maximises the
+   distance to the nearest chosen cell.
+3. If the grid can't fit that many at `minCellDistance`, **relax** the distance step by step
+   (`d, d-1, … 0`).
+4. Last resort: take any remaining free cell.
+
+This is what fixed the old lock-up: the previous inline picker could return a short list and
+`GenerateShapes` then indexed past the end and threw, aborting the load.
+
+### 2 · Turn-based growth — `ShapeGenerator.GrowShapes()`
+
+Each seed becomes a `ShapeData`; its seed triangle goes on a `Queue<Triangle>` frontier.
+Shapes take turns; each expands up to `MovesPerTurn` (`rng.Next(1, 3)`) triangles per round:
 
 ```csharp
-List<Triangle> PickDistributedSeeds(int K)
-{
-    var cells = SeedCellSelector.Select(
-        grid.GridWidth, grid.GridHeight, K,
-        SeedMinCellDistance, PreSeedCorners, seedRng);
-
-    var seeds = new List<Triangle>(cells.Count);
-    foreach (var c in cells)
-    {
-        var t = FindTriangleAt(c.x, c.y);   // O(1) via the grid registry
-        if (t != null) seeds.Add(t);
-    }
-    return seeds;
-}
+while (anyProgress && unownedCount > 0)
+  foreach (shape)
+    repeat MovesPerTurn times, while the frontier is non-empty:
+      current = shape.GrowthQueue.Dequeue()
+      if NeighborSelector.TryPickNext(current, shape, grid, minTrianglesPerBox, rng, out picked)
+         || TryGrowFromAnyOwned(shape, current, out picked):
+             ClaimTriangle(picked, shape);   shape.GrowthQueue.Enqueue(picked)
 ```
 
-**Why This Works:**
-- Corners first → Natural starting points
-- Far-first selection → Balanced distribution
-- Minimum distance rule → Avoids clustering
-- Progressive relaxation → `SeedCellSelector` always returns exactly
-  `min(shapeCount, gridWidth × gridHeight)` cells: it honours the minimum
-  distance where the grid allows, then relaxes it step-by-step, then fills from
-  any free cell. Generation can never stall or crash on a tight config.
+Ownership is a field — `Triangle.ownerShapeIndex` (`-1` = unowned) — plus a running
+`unownedCount`, so `ClaimTriangle` is O(1). There is no per-move rebuild of an "unowned pool".
 
-#### Shape Growth Algorithm
-```csharp
-// Turn-based expansion. Ownership lives on Triangle.ownerShapeIndex, and a
-// running `unownedCount` replaces the old per-move rebuild of an "unowned" list.
-void GrowShapes()
-{
-    bool anyProgress = true;
+### 3 · Neighbour selection — `NeighborSelector.TryPickNext(...)`
 
-    while (anyProgress && unownedCount > 0)
-    {
-        anyProgress = false;
+A 3-priority chain, all reads via `grid.TryGetTriangle(x, y, pos, out t)` (O(1)) + a bounds
+check:
 
-        foreach (var shape in Shapes)
-        {
-            for (int m = 0; m < shape.MovesPerTurn          // Random(1, 2)
-                            && shape.GrowthQueue.Count > 0
-                            && unownedCount > 0; m++)
-            {
-                var current = shape.GrowthQueue.Dequeue();  // Queue<Triangle>
+| Priority | Rule |
+|---|---|
+| **1 — same cell** | fill the current cell up to `minTrianglesPerBox` before spreading; prefer a position adjacent to the current one |
+| **2 — adjacent cell** | step into a neighbour cell through a matching *door*: the exit position in the current cell must be owned, the entry position in the neighbour must be empty. Prefers fully-empty neighbour cells; `rng` breaks ties |
+| **3 — any owned cell** | fill any empty position in a cell the shape already owns (rule ignored) |
 
-                // 3-priority selector, then a retry from any owned triangle
-                if (NeighborSelector.TryPickNext(
-                        current, shape, gridBuilder, minTrianglesPerBox, out var picked)
-                    || TryGrowFromAnyOwned(shape, current, out picked))
-                {
-                    ClaimTriangle(picked, shape);           // O(1): owner + count
-                    shape.GrowthQueue.Enqueue(picked);
-                    anyProgress = true;
-                }
-                // else: this frontier triangle can't expand - drop it
-            }
-        }
-    }
+Door pairing: Up(1)↔Down(4), Right(2)↔Left(3).
 
-    EnsureFullCoverage();   // BFS mop-up: 100% coverage, guaranteed
-}
-```
+### 4 · Coverage guarantee — `ShapeGenerator.EnsureFullCoverage()`
 
-**Key Properties:**
-- ✅ Turn-based prevents one shape hogging
-- ✅ Queue-based ensures all shapes progress
-- ✅ Random moves per turn = varied results each run
-- ✅ **Guaranteed 100% grid coverage** — after the turn-based phase, `EnsureFullCoverage`
-  runs a BFS from the owned frontier and assigns every remaining triangle to an adjacent
-  shape. The grid's triangle graph is connected and every shape has a seed, so coverage is
-  total by construction (a PlayMode test asserts it for every level config).
-- ✅ O(1) bookkeeping — ownership is a field on `Triangle` (`ownerShapeIndex`) plus a running
-  count; no per-move rebuild of an "unowned" list, and `NeighborSelector` reads the grid via
-  O(1) registry lookups.
+After growth, any still-unowned triangle is claimed by a BFS from the owned frontier (a
+triangle's neighbours = its 3 same-cell siblings + the one triangle it faces in the adjacent
+cell). The triangle graph is connected and every shape has a seed, so this **always drives
+`unownedCount` to 0** — 100% coverage, disjoint partition, by construction. (A forced fallback
+to `Shapes[0]` + a warning stays as unreachable defence.)
+
+### Determinism
+
+Generation *topology* draws only from the `System.Random` passed to `ShapeGenerator` — seed
+placement, `MovesPerTurn`, and the priority-2 tie-break. Nothing in the topology path uses
+`UnityEngine.Random`. **Same seed ⇒ byte-for-byte identical `ownerShapeIndex` across the whole
+grid.** (Shape *colour* order comes from `IColorPalette.Shuffle`, which still uses
+`UnityEngine.Random` — cosmetic only.)
+
+### Why the puzzle is always solvable
+
+`PuzzleBoard` builds a grid **identical** to the generation grid. The shapes are a disjoint
+partition of that grid, so each shape has exactly one correct placement and together they tile
+the board with no gaps or overlaps. A solution therefore exists for every generated level;
+placing all `shapeCount` shapes fills the board.
 
 ---
 
-### 2. Three-Priority Neighbor Selection
+## 🎯 Snap-to-grid — `SnapUtil.TrySnapToBoard(...)`
 
-**Problem:** Expand shapes smoothly across grid without overlaps.
+Called from `DragTriangleParentInput.EndDrag`. All-or-nothing, then greedy:
 
-**Solution:** Priority-based selection with entry/exit door logic.
+1. **Gate** — every triangle of the dragged shape must have a **same-`posIndex`** board slot
+   within `SNAP_DIST_WORLD_XY` (5 world units; triangle spacing is 10). Any miss → abort, the
+   shape stays where it was dropped.
+2. Collect all `(shapeTri, boardTri)` pairs within the threshold, sorted nearest-first.
+3. **Greedy assign** — take the closest pair whose shape triangle and board slot are both
+   still free; no slot is double-booked.
+4. Reject if any target slot is already `isSnapped`.
+5. **Commit** — move each shape triangle onto its slot's world XY, `RegisterBoardTriangle` on
+   the `ShapeData`, flag both sides `isSnapped`, and `PuzzleBoard.OnShapePlaced()`.
 
-All grid queries go through `grid.TryGetTriangle(x, y, pos, out t)` (an O(1)
-dictionary) plus a bounds check — there is no linear scan of an "unowned pool".
-
-```csharp
-public static bool TryPickNext(
-    Triangle current,
-    ShapeData shape,
-    GridBuilder grid,
-    int minTrianglesPerBox,
-    System.Random rng,          // tie-breaks among equally-valid adjacent cells
-    out Triangle picked)
-{
-    int group = shape.ShapeIndex;
-
-    // PRIORITY 1: fill the current cell first (up to minTrianglesPerBox)
-    if (TryPickFromSameCell(current, grid, group, minTrianglesPerBox, out picked))
-        return true;
-
-    // PRIORITY 2: step into an adjacent cell through a matching entry/exit door
-    if (TryPickFromAdjacentCell(current, grid, group, out picked))
-        return true;
-
-    // PRIORITY 3: fill any empty position in a cell the shape already owns
-    if (TryPickFromAnyOwnedCell(shape, grid, out picked))
-        return true;
-
-    picked = null;
-    return false;
-}
-```
-
-#### Entry/Exit Door Logic
-```csharp
-// Only expand via matching positions
-static int GetExitDoorPosition(int fromX, int fromY, int toX, int toY)
-{
-    int dx = toX - fromX;
-    int dy = toY - fromY;
-    
-    // Up (1) ↔ Down (4), Right (2) ↔ Left (3)
-    if (dx == 1) return 2;   // Moving RIGHT: exit via RIGHT
-    if (dx == -1) return 3;  // Moving LEFT: exit via LEFT
-    if (dy == 1) return 1;   // Moving UP: exit via UP
-    if (dy == -1) return 4;  // Moving DOWN: exit via DOWN
-    
-    return -1;
-}
-```
-
-**Why Entry/Exit Doors?**
-- Smooth borders between shapes
-- Natural flow (no weird zigs/zags)
-- Prevents fragmented expansions
+Picking a placed shape back up (`TryBeginDrag`) calls `OnShapeRemoved` + `ResetAllSnaps`, so
+you can freely rearrange — there is no undo stack.
 
 ---
 
-### 3. Custom Triangle Rendering (Zero External Assets)
+## 🎨 Rendering — `TriangleMeshRenderer`
 
-**Problem:** Need efficient, dynamic triangle rendering without external assets.
-
-**Solution:** Mesh generation + vertex colors + MaterialPropertyBlock.
-
-```csharp
-public class TriangleMeshRenderer : MonoBehaviour
-{
-    [SerializeField] private Vector3 vertexA = new(0, 0.5f, 0);
-    [SerializeField] private Vector3 vertexB = new(-0.5f, -0.5f, 0);
-    [SerializeField] private Vector3 vertexC = new(0.5f, -0.5f, 0);
-    [SerializeField] private Color triangleColor = Color.white;
-    
-    private Mesh triangleMesh;
-    private MeshFilter meshFilter;
-    private MeshRenderer meshRenderer;
-    private MaterialPropertyBlock mpb;
-    
-    private void Initialize()
-    {
-        meshFilter = GetComponent<MeshFilter>();
-        meshRenderer = GetComponent<MeshRenderer>();
-        
-        // Create material with custom shader
-        var shader = Shader.Find("Custom/SimpleTriangleColor");
-        var mat = new Material(shader);
-        meshRenderer.material = mat;
-        
-        // Reusable property block (no material duplication)
-        mpb = new MaterialPropertyBlock();
-        
-        // Create mesh
-        triangleMesh = new Mesh();
-        meshFilter.mesh = triangleMesh;
-    }
-    
-    public void UpdateMesh()
-    {
-        triangleMesh.Clear();
-        
-        // 3 vertices
-        triangleMesh.vertices = new Vector3[] 
-        { 
-            vertexA, vertexB, vertexC 
-        };
-        
-        // Double-sided (front + back)
-        triangleMesh.triangles = new int[] 
-        { 
-            0, 1, 2,  // Front
-            0, 2, 1   // Back
-        };
-        
-        triangleMesh.RecalculateNormals();
-        triangleMesh.RecalculateBounds();
-    }
-    
-    public void UpdateColor()
-    {
-        // Vertex colors
-        Color[] colors = new Color[3];
-        for (int i = 0; i < 3; i++)
-            colors[i] = triangleColor;
-        triangleMesh.colors = colors;
-        
-        // Apply via MaterialPropertyBlock (efficient!)
-        if (mpb != null && meshRenderer != null)
-        {
-            mpb.SetColor("_Color", triangleColor);
-            meshRenderer.SetPropertyBlock(mpb);  // No new material created
-        }
-    }
-    
-    public void SetColor(Color newColor)
-    {
-        triangleColor = newColor;
-        UpdateColor();
-    }
-}
-```
-
-**Why MaterialPropertyBlock?**
-- Single update applies to all triangles
-- No new material instances (saves memory)
-- Efficient batch rendering
-
----
-
-### 4. Snap-to-Grid Algorithm
-
-**Problem:** the player drops a dragged shape; it must snap onto the board only when it
-genuinely lines up with free, matching slots.
-
-**Solution:** `SnapUtil.TrySnapToBoard` — an all-or-nothing gate, then greedy nearest-first
-matching. Called from `DragTriangleParentInput.EndDrag`:
-
-```csharp
-public static bool TrySnapToBoard(
-    Transform dragRoot, List<Triangle> shapeTriangles,
-    Transform boardRoot, List<Triangle> boardTriangles,
-    Transform shapeParent, bool setFlags = true, bool setSlotFlags = true)
-{
-    // GATE: every shape triangle must have a same-posIndex board slot within
-    //       SNAP_DIST_WORLD_XY (5 world units; triangle spacing is 10). Any miss -> abort.
-    if (!GateAllWithinThreshold(shapeTriangles, boardTriangles)) return false;
-
-    // Collect all (shapeTri, boardTri) pairs within the threshold, nearest first
-    var pairs = CollectPairsWithinThreshold(shapeTriangles, boardTriangles);   // sorted by dist
-
-    // Greedy assignment: take the closest pair whose shape tri and board slot are both free
-    var assigned = AssignGreedy(pairs);                       // Dictionary<shapeTri, boardTri>
-    if (assigned.Count == 0) return false;
-
-    // Reject if any target slot is already occupied (tri.isSnapped)
-    if (!AllAssignedSlotsFree(assigned)) return false;
-
-    // Commit: move each shape triangle onto its slot's world XY, record the slots on
-    // ShapeData, and flag both sides as snapped
-    ApplyWorldSnap(boardRoot, assigned);
-    foreach (var (shapeTri, slotTri) in assigned)
-    {
-        shapeParent.GetComponent<ShapeData>().RegisterBoardTriangle(slotTri);
-        shapeTri.SnapState(true);
-        slotTri.SnapState(true);
-    }
-    return true;
-}
-```
-
-On success `PuzzleBoard.OnShapePlaced()` bumps `placedPieceCount`; the level completes when
-`placedPieceCount >= shapeCount`. Because the generated shapes are a perfect partition of a
-board-identical grid, placing every shape fills the board exactly — which is why the level is
-**solvable by construction**.
-
----
-
-## 🎨 Customization
-
-### Change Level Difficulty
-Edit `Assets/levels.json`:
-
-```json
-{
-  "levels": [
-    {
-      "levelId": "level-1",
-      "difficulty": "easy",
-      "gridWidth": 4,
-      "gridHeight": 4,
-      "shapeCount": 5,
-      "minTrianglesPerBox": 4,
-      "seedMinCellDistance": 1
-    },
-    {
-      "levelId": "level-7",
-      "difficulty": "hard",
-      "gridWidth": 6,
-      "gridHeight": 6,
-      "shapeCount": 10,
-      "minTrianglesPerBox": 3,
-      "seedMinCellDistance": 1
-    }
-  ]
-}
-```
-
-Level ids are `level-1` … `level-9` (three per difficulty). `LevelData.IsValid()`
-enforces the ranges: grid 4–6, `shapeCount` 5–12, `minTrianglesPerBox` 2–4,
-`seedMinCellDistance` 1–3.
-
-### Modify Colors
-1. Create a palette via **Assets ▸ Create ▸ Game ▸ Color Palette** (or duplicate the existing
-   `ColorPaletteSO.asset` in `Assets/_scripts/Runtime/Data/Configs/Palettes/`) and fill its
-   `colors` array
-2. Assign it to the **Color Palette** field on the **GameBootstrap** object
-3. At startup `GameBootstrap` converts it to `Rgba[]` and registers a `DistinctColorPalette`
-   on the Service Locator, so every generated level uses it
+No sprites or external art. Each triangle builds a 3-vertex, double-sided `Mesh` at runtime,
+writes vertex colours, and pushes its colour through a `MaterialPropertyBlock` into the
+`Custom/SimpleTriangleColor` shader — so recolouring never instantiates a material.
 
 ---
 
 ## 🔧 Configuration
 
-### Level Parameters
+### `Assets/levels.json`
 
-| Parameter | Type | Effect |
-|-----------|------|--------|
-| `gridWidth` | int | Grid width in squares (4–6) |
-| `gridHeight` | int | Grid height in squares (4–6) |
-| `shapeCount` | int | Number of shapes to generate (5–12) |
-| `minTrianglesPerBox` | int | Min triangles per square before a shape spreads (2–4) |
-| `seedMinCellDistance` | int | Preferred spacing between shape seeds (1–3); relaxed automatically if the grid can't fit that many |
+Ids are `level-1` … `level-9`, three per difficulty (easy 4×4, medium 5×5, hard 6×6):
 
-### Loading Levels
+```json
+{
+  "levelId": "level-7",
+  "difficulty": "hard",
+  "gridWidth": 6,
+  "gridHeight": 6,
+  "shapeCount": 10,
+  "minTrianglesPerBox": 3,
+  "seedMinCellDistance": 1
+}
+```
 
-`LevelManager` reads levels on `Start()` via a coroutine. Everything is configured through
-its Inspector fields (they are `[SerializeField] private`, not a public API):
+`LevelData.IsValid()` enforces: grid **4–6**, `shapeCount` **5–12**, `minTrianglesPerBox`
+**2–4**, `seedMinCellDistance` **1–3**.
 
 | Field | Effect |
-|-------|--------|
-| **Local Json File** | `TextAsset` for `levels.json` — used by default, and as the fallback |
-| **Download From Server** / **Server Url** | when enabled, `UnityWebRequest.Get` the URL and parse it; on any failure it falls back to **Local Json File** |
-| **Selected Difficulty** | `easy` / `medium` / `hard` — picks a random matching level |
-| **Specific Level Id** | non-empty overrides the random pick with that exact level |
+|---|---|
+| `gridWidth` / `gridHeight` | grid size in cells |
+| `shapeCount` | number of shapes (= pieces to place to win) |
+| `minTrianglesPerBox` | how full a cell gets before a shape spreads — higher = chunkier shapes |
+| `seedMinCellDistance` | preferred spacing between seeds; relaxed automatically if the grid can't fit that many |
 
-`LevelManager.LoadNextLevel()` / `LoadSpecificLevel(id)` re-run the whole flow at runtime
-(the *Next Level* button calls the former).
+### `LevelManager` (Inspector)
 
----
+| Field | Effect |
+|---|---|
+| **Local Json File** | `levels.json` `TextAsset` — default source and fallback |
+| **Download From Server** / **Server Url** | fetch `levels.json` over HTTP, falling back to the local file on any failure |
+| **Selected Difficulty** | `easy` / `medium` / `hard` — a random level of that tier |
+| **Specific Level Id** | non-empty overrides the random pick |
 
-## 📚 Patterns & Architecture Decisions
+### Colours
 
-### Service Locator (Global Registry)
-```csharp
-// Register (GameBootstrap does this on Awake)
-ServiceLocator.Register<IColorPalette>(new DistinctColorPalette(rgba));
-
-// Retrieve anywhere
-if (ServiceLocator.TryGet<IColorPalette>(out var palette)) { /* ... */ }
-```
-Registered services: `IColorPalette` (`DistinctColorPalette`), `IPrefabPooler`
-(`PrefabPoolerService`), `IShapeScatter` (`ShapeScatterService`).
-
-**Trade-off:** Convenient global access vs hidden dependencies.
-**When to use:** For singleton-like services (pools, managers, config).
-
-### Object Pooling (Reuse, Don't Recreate)
-```csharp
-// One handle per prefab; prewarms `prewarmCount` inactive instances
-var trianglePool = pooler.CreatePool(trianglePrefab, prewarmCount: gridW * gridH * 4);
-
-var tri = trianglePool.SpawnImmediate(pos, rot, parent);  // reuses an idle instance
-trianglePool.Despawn(tri);                                // back to the pool, deactivated
-```
-
-**Benefit:** no `Instantiate`/`Destroy` churn once the pool is warm.
-
-### Strategy Pattern (Flexible Expansion)
-```csharp
-// NeighborSelector implements multiple strategies
-// - Priority 1: Same-cell neighbors
-// - Priority 2: Adjacent-cell neighbors  
-// - Priority 3: Fallback
-
-// Easy to modify rules without changing core algorithm
-```
+Assign a `ColorPaletteSO` (Create ▸ *Game ▸ Color Palette*) to **GameBootstrap ▸ Color
+Palette**; it is converted to `Rgba[]` and registered as `DistinctColorPalette`. With no
+palette, `ShapeGenerator` falls back to random vivid HSV colours (seeded from its `rng`).
 
 ---
 
 ## 🧪 Tests
 
-Automated tests use the **Unity Test Framework** (NUnit). Runtime code is in the
-`PuzzleForge.Runtime` assembly so test assemblies can reference it.
+Runtime code lives in `PuzzleForge.Runtime` so the test assemblies can reference it.
+Run via **Window ▸ General ▸ Test Runner** (EditMode / PlayMode ▸ *Run All*), or:
 
-**Run them:**
-- Editor: `Window ▸ General ▸ Test Runner ▸` (EditMode / PlayMode) `▸ Run All`
-- CLI: `Unity -batchmode -runTests -testPlatform EditMode -projectPath . -logFile -`
-  (and again with `-testPlatform PlayMode`)
+```bash
+Unity -batchmode -runTests -testPlatform EditMode -projectPath . -logFile -
+Unity -batchmode -runTests -testPlatform PlayMode -projectPath . -logFile -
+```
 
-**Current coverage:**
+| Suite | Mode | Asserts |
+|---|---|---|
+| `SeedCellSelectorTests` (21) | EditMode | `Select(...)` returns exactly `min(shapeCount, cells)` distinct in-bounds cells for **every** `levels.json` config (regression for the lock-up), plus min-distance-when-it-fits, clamping when `shapeCount > cells`, determinism, and degenerate inputs |
+| `ShapeGenerationTests` (13) | PlayMode | for every level config (and the two that used to crash): **100% coverage**, shapes are a **disjoint partition**, `ownerShapeIndex` agrees with each shape, and a fixed seed reproduces the exact per-triangle ownership |
 
-| Suite | Mode | What it checks |
-|-------|------|----------------|
-| `SeedCellSelectorTests` | EditMode | Seed placement returns exactly `min(shapeCount, cells)` distinct in-bounds cells for every `levels.json` config (regression for the generation lock-up), plus min-distance, clamping, determinism, and degenerate inputs. |
-| `ShapeGenerationTests` | PlayMode | Every level config fills 100% of the grid, shapes form a disjoint partition of the triangles, `ownerShapeIndex` agrees with each shape, generation is reproducible for a fixed seed. Also covers the two configs that used to crash. |
+The PlayMode suite drives the real `GridBuilder` / `ShapeGenerator` through a minimal fake
+`IPrefabPool`.
 
-The seed logic is isolated in `SeedCellSelector` (its own assembly, no `MonoBehaviour`
-dependency) so it can be unit-tested directly; the PlayMode suite drives the real
-`GridBuilder` / `ShapeGenerator` through a lightweight fake object pool.
+### Logging
+
+Routine trace goes through `GameLog.Info(...)` — **off by default**; set `GameLog.Verbose =
+true` or define `GAMELOG_VERBOSE`. Warnings and errors always print.
 
 ---
 
-## 🧪 What the Tests Assert
+## 📖 Extending
 
-Patterns used by `SeedCellSelectorTests` (EditMode) and `ShapeGenerationTests` (PlayMode):
+**New neighbour rule** — add a method to `NeighborSelector`, slot it into the `TryPickNext`
+chain, run `ShapeGenerationTests` to confirm coverage + partition still hold.
 
-### Reproducibility
-Generation *topology* draws only from the `System.Random` passed to `ShapeGenerator` — seed
-placement, `MovesPerTurn`, and neighbour tie-breaks all use it, and nothing uses
-`UnityEngine.Random`. Same seed ⇒ identical per-triangle ownership.
+**New difficulty tier** — add `levels.json` entries with a new `difficulty` string (within the
+`IsValid()` ranges), point **LevelManager ▸ Selected Difficulty** at it.
 
-```csharp
-var gen = new ShapeGenerator(grid, shapePool, root, palette, minPerBox,
-                             rng: new System.Random(42));
-gen.GenerateShapes();
-// grid.AllTriangles.Select(t => t.ownerShapeIndex) is byte-for-byte equal on a rerun
-```
-
-(Shape *colour* order still comes from `IColorPalette.Shuffle` on `UnityEngine.Random`; it's
-cosmetic — see [Known Limitations](#-known-limitations).)
-
-### Solvability (by construction)
-A level is solvable because the generated shapes are a **disjoint partition of a grid identical
-to the board** — assert that, not a snap search:
-
-```csharp
-var owned = gen.Shapes.SelectMany(s => s.OccupiedTriangles).ToList();
-Assert.AreEqual(grid.AllTriangles.Count, owned.Count);        // covers every triangle
-Assert.AreEqual(owned.Count, owned.Distinct().Count());       // no triangle shared
-```
-
-### Coverage
-```csharp
-Assert.IsFalse(grid.AllTriangles.Any(t => t.ownerShapeIndex < 0));   // 100% claimed
-```
+**Async generation** — `LevelGenerator.GenerateLevel()` is synchronous; move it to a coroutine
+and `yield` between grid build / growth / scatter for a progress bar.
 
 ---
 
-## 📖 How to Extend
+## 🐛 Known limitations
 
-### Add New Neighbor Selection Rule
-1. Add method to `NeighborSelector` (e.g., `TryPickFromDiagonal()`)
-2. Insert in the `TryPickNext` priority chain before/after existing priorities
-3. Run the PlayMode `ShapeGenerationTests` to confirm 100% coverage and a clean
-   disjoint partition still hold for every level config
-
-### Add New Difficulty Tier
-1. Add entries to `levels.json` with a new `difficulty` string (keep params inside
-   `LevelData.IsValid()`'s ranges)
-2. Set **LevelManager ▸ Selected Difficulty** to that string (`GetRandomLevel` filters by it)
-3. Tune `minTrianglesPerBox` / `seedMinCellDistance` for the shape feel you want
-
-### Implement Async Level Loading
-1. Move `GenerateLevel()` to coroutine
-2. Yield between major phases (seed picking → growing → coloring)
-3. Update UI progress bar
-
----
-
-## 🐛 Known Limitations
-
-- **UI Minimal:** only a level-complete panel — no menu, HUD, or difficulty picker
-- **No Audio:** no music or effects
-- **No move history:** placed shapes can be picked up and re-placed, but there is no undo stack
-- **Single Player:** no multiplayer
-- **Legacy input:** mouse-only, via the old `Input` manager (not the new Input System)
-- **Colour ordering not seeded:** generation topology is fully reproducible from the injected
+- **UI** — a single level-complete panel; no menu, HUD, difficulty picker, or pause.
+- **No audio.**
+- **No move history** — shapes can be picked up and re-placed, but there's no undo.
+- **Single player.**
+- **Legacy input** — mouse only, via the old `Input` manager (not the Input System).
+- **Colour ordering not seeded** — topology is fully reproducible from the injected
   `System.Random`, but `IColorPalette.Shuffle` still uses `UnityEngine.Random`, so which shape
-  gets which colour varies run to run (cosmetic only)
+  gets which colour varies run to run (cosmetic).
+- **Scatter is separate** — `ShapeScatterService` uses its own `System.Random`; it only
+  affects where pieces start, not the puzzle.
 
 ---
 
 ## 📄 License
 
-MIT License - See LICENSE file
+MIT — see `LICENSE`.
 
 ---
 
-## 👨‍💻 Development
-
-### Code Examples
-- Seed placement in `SeedCellSelector.cs`; growth + coverage in `ShapeGenerator.cs`
-- Entry/exit door logic in `NeighborSelector.cs`
-- Custom rendering in `TriangleMeshRenderer.cs`
-- XML docs on the generation, level, board and UI classes
-
-### Repository
-- Clean Architecture with clear separation
-- Service Locator for dependency management
-- Object pooling for performance
-- Grid-based spatial lookups (O(1))
-
----
-
-**Last Updated:** September 2, 2026  
-**Unity:** 2022.3 LTS (tested on 2022.3.62f3)  
-**C#:** 9.0+
-
----
-
-Made with 💪 - Demonstrates procedural generation, algorithm design, and clean architecture patterns.
+**Unity:** 2022.3 LTS (tested on 2022.3.62f3) · **C#:** 9 · **Render pipeline:** built-in
