@@ -5,11 +5,12 @@ using Yunus.Game.Board;
 namespace Yunus.Game.Gameplay
 {
     /// <summary>
-    /// Handles drag and drop input for shape pieces.
-    /// Supports snap-to-puzzle-board functionality.
+    /// Handles drag and drop input for shape pieces: on mouse-down it grabs the
+    /// <see cref="ShapeData"/> root of whatever triangle was hit, drags it on a plane facing the
+    /// camera, and on mouse-up asks <see cref="SnapUtil"/> to snap it onto the puzzle board.
     /// </summary>
     [DisallowMultipleComponent]
-    public class DragAnyParentInput : MonoBehaviour
+    public class DragTriangleParentInput : MonoBehaviour
 {
     [Header("Camera")]
     [SerializeField] private Camera cam;
