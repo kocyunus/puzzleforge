@@ -1,0 +1,52 @@
+# Normalise line endings: text is LF in the repo, checked out as-is.
+* text=auto eol=lf
+
+# Explicit text types (Unity + tooling)
+*.cs        text eol=lf diff=csharp
+*.shader    text eol=lf
+*.cginc     text eol=lf
+*.hlsl      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.xml       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+# Unity serialised assets (YAML) - always LF, and mergeable
+*.meta      text eol=lf merge=unityyamlmerge
+*.unity     text eol=lf merge=unityyamlmerge
+*.asset     text eol=lf merge=unityyamlmerge
+*.prefab    text eol=lf merge=unityyamlmerge
+*.mat       text eol=lf merge=unityyamlmerge
+*.anim      text eol=lf merge=unityyamlmerge
+*.controller text eol=lf merge=unityyamlmerge
+*.asmdef    text eol=lf
+*.asmref    text eol=lf
+*.dwlt      text eol=lf
+
+# Binary assets - never touched by diff/eol
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.psd   binary
+*.tga   binary
+*.tif   binary
+*.ico   binary
+*.wav   binary
+*.mp3   binary
+*.ogg   binary
+*.aif   binary
+*.fbx   binary
+*.blend binary
+*.ttf   binary
+*.otf   binary
+*.dll   binary
+*.so    binary
+*.dylib binary
+*.a     binary
+*.unitypackage binary
+*.pdf   binary
