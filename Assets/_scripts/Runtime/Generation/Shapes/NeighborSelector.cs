@@ -32,6 +32,7 @@ namespace Yunus.Game.Generation
             ShapeData shape,
             GridBuilder grid,
             int minTrianglesPerBox,
+            System.Random rng,
             out Triangle picked)
         {
             picked = null;
@@ -40,7 +41,7 @@ namespace Yunus.Game.Generation
             int group = shape.ShapeIndex;
 
             if (TryPickFromSameCell(current, grid, group, minTrianglesPerBox, out picked)) return true;
-            if (TryPickFromAdjacentCell(current, grid, group, out picked)) return true;
+            if (TryPickFromAdjacentCell(current, grid, group, rng, out picked)) return true;
             if (TryPickFromAnyOwnedCell(shape, grid, out picked)) return true;
 
             return false;
@@ -101,6 +102,7 @@ namespace Yunus.Game.Generation
             Triangle current,
             GridBuilder grid,
             int group,
+            System.Random rng,
             out Triangle picked)
         {
             picked = null;
@@ -139,7 +141,7 @@ namespace Yunus.Game.Generation
                 }
             }
 
-            var pick = valid[Random.Range(0, valid.Count)];
+            var pick = valid[rng?.Next(valid.Count) ?? 0];
             picked = TriAt(grid, pick.nx, pick.ny, pick.entryPos);
             return picked != null;
         }

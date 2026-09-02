@@ -117,19 +117,20 @@ namespace Yunus.Game.Tests
         }
 
         [Test]
-        public void Generate_IsReproducible_ForSameSeeds()
+        public void Generate_IsReproducible_FromTheInjectedSeedAlone()
         {
-            List<int> Sizes(int unitySeed, int rngSeed)
+            // Topology draws only from the injected System.Random now (no UnityEngine.Random),
+            // so the exact per-triangle ownership must match between two same-seed runs.
+            List<int> Owners(int seed)
             {
-                UnityEngine.Random.InitState(unitySeed);
-                using var run = Generate(6, 6, 10, 3, 1, rngSeed);
-                return run.Gen.Shapes
-                    .OrderBy(s => s.ShapeIndex)
-                    .Select(s => s.OccupiedTriangles.Count)
-                    .ToList();
+                using var run = Generate(6, 6, 10, 3, 1, seed);
+                return run.Grid.AllTriangles.Select(t => t.ownerShapeIndex).ToList();
             }
 
-            CollectionAssert.AreEqual(Sizes(4242, 7), Sizes(4242, 7));
+            CollectionAssert.AreEqual(Owners(7), Owners(7));
+            CollectionAssert.AreEqual(Owners(99), Owners(99));
+            Assert.IsFalse(Owners(7).SequenceEqual(Owners(99)),
+                "different seeds produced identical ownership");
         }
 
         // ---- helpers ----

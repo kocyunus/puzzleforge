@@ -259,6 +259,7 @@ public static bool TryPickNext(
     ShapeData shape,
     GridBuilder grid,
     int minTrianglesPerBox,
+    System.Random rng,          // tie-breaks among equally-valid adjacent cells
     out Triangle picked)
 {
     int group = shape.ShapeIndex;
@@ -582,18 +583,19 @@ dependency) so it can be unit-tested directly; the PlayMode suite drives the rea
 Patterns used by `SeedCellSelectorTests` (EditMode) and `ShapeGenerationTests` (PlayMode):
 
 ### Reproducibility
-`SeedCellSelector` takes a `System.Random`, so seed placement is deterministic. `ShapeGenerator`
-also accepts one (`seedRng`); fixing `UnityEngine.Random.InitState` too then makes a run
-repeatable enough to compare shape-size distributions (full bit-for-bit repro is still a
-[known limitation](#-known-limitations)).
+Generation *topology* draws only from the `System.Random` passed to `ShapeGenerator` — seed
+placement, `MovesPerTurn`, and neighbour tie-breaks all use it, and nothing uses
+`UnityEngine.Random`. Same seed ⇒ identical per-triangle ownership.
 
 ```csharp
-UnityEngine.Random.InitState(42);
 var gen = new ShapeGenerator(grid, shapePool, root, palette, minPerBox,
-                             seedRng: new System.Random(42));
+                             rng: new System.Random(42));
 gen.GenerateShapes();
-// a second run with the same two seeds yields the same sorted shape sizes
+// grid.AllTriangles.Select(t => t.ownerShapeIndex) is byte-for-byte equal on a rerun
 ```
+
+(Shape *colour* order still comes from `IColorPalette.Shuffle` on `UnityEngine.Random`; it's
+cosmetic — see [Known Limitations](#-known-limitations).)
 
 ### Solvability (by construction)
 A level is solvable because the generated shapes are a **disjoint partition of a grid identical
@@ -640,10 +642,9 @@ Assert.IsFalse(grid.AllTriangles.Any(t => t.ownerShapeIndex < 0));   // 100% cla
 - **No move history:** placed shapes can be picked up and re-placed, but there is no undo stack
 - **Single Player:** no multiplayer
 - **Legacy input:** mouse-only, via the old `Input` manager (not the new Input System)
-- **Debug logging:** `SnapUtil` / `LevelManager` log verbosely on the hot path
-- **Generation RNG not fully seeded:** seed placement is injectable, but `MovesPerTurn`
-  and shape colour still use the global `UnityEngine.Random`, so a single seed does not
-  reproduce a run bit-for-bit yet
+- **Colour ordering not seeded:** generation topology is fully reproducible from the injected
+  `System.Random`, but `IColorPalette.Shuffle` still uses `UnityEngine.Random`, so which shape
+  gets which colour varies run to run (cosmetic only)
 
 ---
 
