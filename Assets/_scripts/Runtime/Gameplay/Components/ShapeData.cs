@@ -19,11 +19,11 @@ namespace Yunus.Game.Gameplay
     public List<Triangle> BoardSnappedTriangles = new List<Triangle>();
 
     [System.NonSerialized]
-    public Queue<int> GrowthQueue;
+    public Queue<Triangle> GrowthQueue;
 
     private void Awake()
     {
-        GrowthQueue = new Queue<int>();
+        GrowthQueue = new Queue<Triangle>();
         OccupiedTriangles = new List<Triangle>();
         BoardSnappedTriangles = new List<Triangle>();
     }
@@ -114,11 +114,12 @@ namespace Yunus.Game.Gameplay
     /// </summary>
     public void ResetForPool(Transform fallbackParent = null)
     {
-        // 1) Disable snap flag for all triangles
+        // 1) Disable snap flag and clear generation ownership for all triangles
         foreach (var tri in OccupiedTriangles)
         {
             if (!tri) continue;
             tri.SnapState(false);
+            tri.ownerShapeIndex = -1;
             // Don't reparent during OnDisable() - causes Unity errors
             // Triangles will be managed by pool
         }

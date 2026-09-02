@@ -86,10 +86,17 @@ Assets/_scripts/Runtime/
 │   └── Snapping/     # Snap-to-grid algorithm
 ├── Generation/        
 │   ├── Grid/         # GridBuilder
+│   ├── Seeding/      # SeedCellSelector (pure, unit-tested)
 │   └── Shapes/       # ShapeGenerator, NeighborSelector
 ├── Level/            # Level loading
 ├── Services/         # Infrastructure (pooling, etc)
 └── Ui/               # Minimal UI
+
+Assets/_scripts/Runtime/     # PuzzleForge.Runtime.asmdef
+
+Assets/Tests/
+├── EditMode/          # SeedCellSelector unit tests
+└── PlayMode/          # ShapeGenerator coverage / partition tests
 ```
 
 ### Key Design Patterns
@@ -164,6 +171,10 @@ List<int> PickDistributedSeeds(int K)
 - Corners first → Natural starting points
 - Far-first selection → Balanced distribution
 - Minimum distance rule → Avoids clustering
+- Progressive relaxation → `SeedCellSelector` always returns exactly
+  `min(shapeCount, gridWidth × gridHeight)` cells: it honours the minimum
+  distance where the grid allows, then relaxes it step-by-step, then fills from
+  any free cell. Generation can never stall or crash on a tight config.
 
 #### Shape Growth Algorithm
 ```csharp
@@ -218,7 +229,13 @@ void GrowShapes()
 - ✅ Turn-based prevents one shape hogging
 - ✅ Queue-based ensures all shapes progress
 - ✅ Random moves per turn = varied results each run
-- ✅ Guaranteed 100% grid coverage (Priority 3 fallback)
+- ✅ **Guaranteed 100% grid coverage** — after the turn-based phase, `EnsureFullCoverage`
+  runs a BFS from the owned frontier and assigns every remaining triangle to an adjacent
+  shape. The grid's triangle graph is connected and every shape has a seed, so coverage is
+  total by construction (a PlayMode test asserts it for every level config).
+- ✅ O(1) bookkeeping — ownership is a field on `Triangle` (`ownerShapeIndex`) plus a running
+  count; no per-move rebuild of an "unowned" list, and `NeighborSelector` reads the grid via
+  O(1) registry lookups.
 
 ---
 
@@ -532,6 +549,29 @@ trianglePool.Despawn(tri);
 
 ---
 
+## 🧪 Tests
+
+Automated tests use the **Unity Test Framework** (NUnit). Runtime code is in the
+`PuzzleForge.Runtime` assembly so test assemblies can reference it.
+
+**Run them:**
+- Editor: `Window ▸ General ▸ Test Runner ▸` (EditMode / PlayMode) `▸ Run All`
+- CLI: `Unity -batchmode -runTests -testPlatform EditMode -projectPath . -logFile -`
+  (and again with `-testPlatform PlayMode`)
+
+**Current coverage:**
+
+| Suite | Mode | What it checks |
+|-------|------|----------------|
+| `SeedCellSelectorTests` | EditMode | Seed placement returns exactly `min(shapeCount, cells)` distinct in-bounds cells for every `levels.json` config (regression for the generation lock-up), plus min-distance, clamping, determinism, and degenerate inputs. |
+| `ShapeGenerationTests` | PlayMode | Every level config fills 100% of the grid, shapes form a disjoint partition of the triangles, `ownerShapeIndex` agrees with each shape, generation is reproducible for a fixed seed. Also covers the two configs that used to crash. |
+
+The seed logic is isolated in `SeedCellSelector` (its own assembly, no `MonoBehaviour`
+dependency) so it can be unit-tested directly; the PlayMode suite drives the real
+`GridBuilder` / `ShapeGenerator` through a lightweight fake object pool.
+
+---
+
 ## 🧪 Testing Your Own Implementation
 
 ### Test Determinism
@@ -594,6 +634,9 @@ Assert.AreEqual(totalTriangles, ownedTriangles);
 - **No Audio:** No music or effects
 - **No Undo:** No move history
 - **Single Player:** No multiplayer
+- **Generation RNG not fully seeded:** seed placement is injectable, but `MovesPerTurn`
+  and shape colour still use the global `UnityEngine.Random`, so a single seed does not
+  reproduce a run bit-for-bit yet
 
 ---
 
@@ -619,8 +662,8 @@ MIT License - See LICENSE file
 
 ---
 
-**Last Updated:** October 28, 2025  
-**Unity:** 2022.3+  
+**Last Updated:** September 2, 2026  
+**Unity:** 2022.3 LTS (tested on 2022.3.62f3)  
 **C#:** 9.0+
 
 ---

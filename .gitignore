@@ -5,8 +5,10 @@ Temp/
 Obj/
 Build/
 Builds/
-Packages/
 Logs/
+# NOTE: Packages/ is intentionally NOT ignored - Packages/manifest.json and
+# Packages/packages-lock.json must be committed so the project resolves the same
+# package set (incl. the Test Framework) on every machine.
 
 # Visual Studio cache/options
 .vs/
@@ -60,7 +62,6 @@ desktop.ini
 # ========== EDITOR CONFIGS ==========
 .vsconfig
 EditorBuildSettings.asset
-Packages/packages-lock.json
 
 # ========== LOGS ==========
 *.log
@@ -107,7 +108,9 @@ artifacts/
 *.userprefs
 
 # ========== NUGET PACKAGES DIRECTORY ==========
-packages/
+# NOTE: not a bare "packages/" - on case-insensitive filesystems that also hides
+# Unity's "Packages/" folder, which must stay tracked.
+**/packages/*.nupkg
 
 # ========== VISUAL STUDIO TEMPORARY BUILDS ==========
 [Dd]ebug/
