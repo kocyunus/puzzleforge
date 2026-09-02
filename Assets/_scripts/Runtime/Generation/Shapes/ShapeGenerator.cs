@@ -35,9 +35,11 @@ namespace Yunus.Game.Generation
         public bool PreSeedCorners { get; set; }
         private int minTrianglesPerBox;
 
-        // Randomness source for seed placement. Injectable so tests can make generation
-        // reproducible; defaults to a fresh instance for "different every run".
-        private readonly System.Random seedRng;
+        // The single randomness source for generation *topology* - seed placement, moves-per-turn,
+        // and neighbour tie-breaks all draw from it. Injectable so a run is fully reproducible from
+        // one seed; defaults to a fresh instance for "different every run". (Shape colour order
+        // still comes from IColorPalette.Shuffle, which is cosmetic and out of scope here.)
+        private readonly System.Random rng;
 
         // Live generation bookkeeping.
         private int unownedCount;
@@ -55,14 +57,14 @@ namespace Yunus.Game.Generation
             Transform parent,
             IColorPalette colorPalette = null,
             int minTrianglesPerBox = 4,
-            System.Random seedRng = null)
+            System.Random rng = null)
         {
             this.gridBuilder = gridBuilder;
             this.shapePool = shapePool;
             this.parentTransform = parent;
             this.colorPalette = colorPalette;
             this.minTrianglesPerBox = minTrianglesPerBox;
-            this.seedRng = seedRng ?? new System.Random();
+            this.rng = rng ?? new System.Random();
 
             Shapes = new List<ShapeData>();
             ShapeCount = 6;
@@ -109,7 +111,7 @@ namespace Yunus.Game.Generation
             GrowShapes();
             EnsureFullCoverage();
 
-            Debug.Log(
+            GameLog.Info(
                 $"[ShapeGenerator] Generated {Shapes.Count} shapes covering " +
                 $"{gridBuilder.AllTriangles.Count - unownedCount}/{gridBuilder.AllTriangles.Count} " +
                 $"triangles (minTrianglesPerBox: {minTrianglesPerBox})");
@@ -127,7 +129,7 @@ namespace Yunus.Game.Generation
             var shapeData = root.GetComponent<ShapeData>();
             shapeData.ShapeIndex = index;
             shapeData.ShapeColor = PickColor(index);
-            shapeData.MovesPerTurn = Random.Range(1, 3);
+            shapeData.MovesPerTurn = rng.Next(1, 3);
 
             ClaimTriangle(seedTri, shapeData);
             shapeData.GrowthQueue.Enqueue(seedTri);
@@ -161,7 +163,7 @@ namespace Yunus.Game.Generation
                         var currentTri = shape.GrowthQueue.Dequeue();
 
                         if (NeighborSelector.TryPickNext(
-                                currentTri, shape, gridBuilder, minTrianglesPerBox, out var picked))
+                                currentTri, shape, gridBuilder, minTrianglesPerBox, rng, out var picked))
                         {
                             ClaimTriangle(picked, shape);
                             shape.GrowthQueue.Enqueue(picked);
@@ -196,7 +198,7 @@ namespace Yunus.Game.Generation
                 if (tri == null || tri == exclude) continue;
 
                 if (NeighborSelector.TryPickNext(
-                        tri, shape, gridBuilder, minTrianglesPerBox, out picked))
+                        tri, shape, gridBuilder, minTrianglesPerBox, rng, out picked))
                     return true;
             }
 
@@ -308,7 +310,8 @@ namespace Yunus.Game.Generation
         }
 
         /// <summary>
-        /// Picks color for shape by index from palette. Falls back to random HSV if no palette.
+        /// Picks color for shape by index from palette. Falls back to a random vivid HSV colour
+        /// (drawn from <see cref="rng"/>) if no palette is set.
         /// </summary>
         Color PickColor(int index)
         {
@@ -318,7 +321,10 @@ namespace Yunus.Game.Generation
                 return new Color(c.R, c.G, c.B, c.A);
             }
 
-            return Random.ColorHSV(0f, 1f, 0.9f, 1f, 0.95f, 1f);
+            float h = (float)rng.NextDouble();
+            float s = 0.9f + 0.1f * (float)rng.NextDouble();
+            float v = 0.95f + 0.05f * (float)rng.NextDouble();
+            return Color.HSVToRGB(h, s, v);
         }
 
         /// <summary>
@@ -337,7 +343,7 @@ namespace Yunus.Game.Generation
                 K,
                 SeedMinCellDistance,
                 PreSeedCorners,
-                seedRng);
+                rng);
 
             var seeds = new List<Triangle>(cells.Count);
             foreach (var cell in cells)

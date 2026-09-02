@@ -70,7 +70,7 @@ namespace Yunus.Game.Generation
             for (int y = 0; y < GridHeight; y++)
                 CreateSquare(x, y);
 
-        Debug.Log($"[GridBuilder] Created {AllTriangles.Count} triangles ({GridWidth}×{GridHeight})");
+        GameLog.Info($"[GridBuilder] Created {AllTriangles.Count} triangles ({GridWidth}×{GridHeight})");
     }
 
     void CreateSquare(int x, int y)

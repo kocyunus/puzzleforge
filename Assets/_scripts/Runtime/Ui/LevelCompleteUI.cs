@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using Yunus.Game.Core;
 using Yunus.Game.Level;
 
 namespace Yunus.Game.UI
@@ -35,7 +36,7 @@ namespace Yunus.Game.UI
             panel.SetActive(true);
 
 
-        Debug.Log("[LevelCompleteUI] Panel shown");
+        GameLog.Info("[LevelCompleteUI] Panel shown");
     }
 
     /// <summary>
@@ -49,7 +50,7 @@ namespace Yunus.Game.UI
 
     void OnNextLevelClicked()
     {
-        Debug.Log("[LevelCompleteUI] Next Level clicked");
+        GameLog.Info("[LevelCompleteUI] Next Level clicked");
 
         Hide();
 

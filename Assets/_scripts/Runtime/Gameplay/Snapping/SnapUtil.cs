@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
+using Yunus.Game.Core;
 
 namespace Yunus.Game.Gameplay
 {
@@ -36,40 +37,40 @@ namespace Yunus.Game.Gameplay
                                       Transform shapeParent,
                                       bool setFlags = true, bool setSlotFlags = true)
     {
-        Debug.Log($"[SnapUtil] TrySnapToBoard STARTED - endDragList:{endDragList?.Count}, boardList:{boardList?.Count}");
+        GameLog.Info($"[SnapUtil] TrySnapToBoard STARTED - endDragList:{endDragList?.Count}, boardList:{boardList?.Count}");
 
         if (!ValidateInputs(endDragRoot, endDragList, boardRoot, boardList))
         {
-            Debug.Log("[SnapUtil] ❌ ValidateInputs FAILED");
+            GameLog.Info("[SnapUtil] ❌ ValidateInputs FAILED");
             return false;
         }
 
         if (!GateAllWithinThreshold(endDragList, boardList))
         {
-            Debug.Log("[SnapUtil] ❌ GateAllWithinThreshold FAILED");
+            GameLog.Info("[SnapUtil] ❌ GateAllWithinThreshold FAILED");
             return false;
         }
 
         var pairs = CollectPairsWithinThreshold(endDragList, boardList);
-        Debug.Log($"[SnapUtil] Pairs collected: {pairs.Count}");
+        GameLog.Info($"[SnapUtil] Pairs collected: {pairs.Count}");
 
         var assigned = AssignGreedy(pairs);
-        Debug.Log($"[SnapUtil] Assigned count: {assigned.Count}");
+        GameLog.Info($"[SnapUtil] Assigned count: {assigned.Count}");
 
         if (assigned.Count == 0)
         {
-            Debug.Log("[SnapUtil] ❌ No assignments");
+            GameLog.Info("[SnapUtil] ❌ No assignments");
             return false;
         }
 
         if (!AllAssignedSlotsFree(assigned))
         {
-            Debug.Log("[SnapUtil] ❌ AllAssignedSlotsFree FAILED - slots already occupied");
+            GameLog.Info("[SnapUtil] ❌ AllAssignedSlotsFree FAILED - slots already occupied");
             return false;
         }
 
         ApplyWorldSnap(boardRoot, assigned);
-        Debug.Log($"[SnapUtil] ✅ WorldSnap applied");
+        GameLog.Info($"[SnapUtil] ✅ WorldSnap applied");
 
         if (shapeParent != null)
         {
@@ -94,7 +95,7 @@ namespace Yunus.Game.Gameplay
                 shapeData.RegisterBoardTriangle(slotTri);
             }
 
-            Debug.Log($"[SnapUtil] ✅ Registered {assigned.Count} board triangles to ShapeData");
+            GameLog.Info($"[SnapUtil] ✅ Registered {assigned.Count} board triangles to ShapeData");
 
             // Call SnapState directly
             if (setFlags && itemsToFlag != null && itemsToFlag.Count > 0)
@@ -116,7 +117,7 @@ namespace Yunus.Game.Gameplay
             }
         }
 
-        Debug.Log("[SnapUtil] ✅✅✅ TrySnapToBoard SUCCESS - returning TRUE");
+        GameLog.Info("[SnapUtil] ✅✅✅ TrySnapToBoard SUCCESS - returning TRUE");
         return true;
     }
 
