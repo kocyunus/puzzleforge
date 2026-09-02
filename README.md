@@ -12,7 +12,7 @@ A production-ready Unity puzzle framework demonstrating advanced procedural gene
 - **✅ Guaranteed Solvable:** Mathematical guarantees ensure every level is winnable
 - **🎮 Drag & Drop Gameplay:** Intuitive shape-snapping puzzle mechanics
 - **📊 Configurable Difficulty:** Easy, Medium, Hard with JSON-based level definitions
-- **⚡ Optimized Performance:** Object pooling, spatial hashing, and grid-based lookups
+- **⚡ Optimized Performance:** Object pooling, O(1) grid-registry lookups, incremental ownership tracking
 - **🏗️ Clean Architecture:** Service locator pattern with clear separation of concerns
 - **🔄 Multi-Seed Shape Synthesis:** Balanced, distributed shape generation
 - **🎨 Custom Rendering:** Zero external asset dependencies - custom triangle mesh renderer
@@ -136,33 +136,48 @@ This position-based indexing is crucial for the entry/exit door logic during sha
 **Solution:** Distributed seed placement + turn-based expansion with priority rules.
 
 #### Seed Distribution Strategy
+
+Cell choice lives in `SeedCellSelector` — a pure, unit-tested class with **no
+`MonoBehaviour` dependency**. It always returns exactly `min(shapeCount, cellCount)`
+distinct in-bounds cells, so generation can never stall or crash on a tight config.
+
 ```csharp
-// Pick seeds across grid (corners → edges → center)
-List<int> PickDistributedSeeds(int K)
+public static List<Vector2Int> Select(
+    int gridWidth, int gridHeight, int shapeCount,
+    int minCellDistance, bool preSeedCorners, System.Random rng)
 {
-    var seeds = new List<int>();
-    
-    // Step 1: Pre-seed corners
-    if (PreSeedCorners && K > 0)
+    int target = Clamp(shapeCount, 0, gridWidth * gridHeight);
+
+    // Step 1: pre-seed up to 4 corners (natural starting points)
+    if (preSeedCorners) TakeCorners(chosen, target);
+
+    // Step 2: greedy "far-first" fill at the requested distance, then
+    //         relax the distance step-by-step (d, d-1, ... 0)
+    for (int d = minCellDistance; d >= 0 && chosen.Count < target; d--)
+        FillGreedy(chosen, edges, centers, phase, d, target);
+
+    // Step 3: last resort - take any remaining free cell
+    if (chosen.Count < target) FillAnyRemaining(chosen, target);
+
+    return chosen;
+}
+```
+
+`ShapeGenerator` just resolves each chosen cell to a concrete triangle:
+
+```csharp
+List<Triangle> PickDistributedSeeds(int K)
+{
+    var cells = SeedCellSelector.Select(
+        grid.GridWidth, grid.GridHeight, K,
+        SeedMinCellDistance, PreSeedCorners, seedRng);
+
+    var seeds = new List<Triangle>(cells.Count);
+    foreach (var c in cells)
     {
-        foreach (var corner in corners)
-        {
-            if (seeds.Count >= 4) break;
-            if (TryAddSeed(corner, out int idx))
-                seeds.Add(idx);
-        }
+        var t = FindTriangleAt(c.x, c.y);   // O(1) via the grid registry
+        if (t != null) seeds.Add(t);
     }
-    
-    // Step 2: Distribute remaining seeds (far-first)
-    while (seeds.Count < K)
-    {
-        var chosen = PickBest(candidates, used, chosenCells);
-        if (chosen.x < 0) break;
-        
-        if (TryAddSeed(chosen, out int idx))
-            seeds.Add(idx);
-    }
-    
     return seeds;
 }
 ```
@@ -178,50 +193,39 @@ List<int> PickDistributedSeeds(int K)
 
 #### Shape Growth Algorithm
 ```csharp
-// Turn-based BFS expansion
+// Turn-based expansion. Ownership lives on Triangle.ownerShapeIndex, and a
+// running `unownedCount` replaces the old per-move rebuild of an "unowned" list.
 void GrowShapes()
 {
     bool anyProgress = true;
-    
-    while (anyProgress)
+
+    while (anyProgress && unownedCount > 0)
     {
         anyProgress = false;
-        
+
         foreach (var shape in Shapes)
         {
-            if (shape.GrowthQueue.Count == 0) continue;
-            
-            // Each shape gets MovesPerTurn moves per round
-            int movesToMake = shape.MovesPerTurn;  // Random(1,2)
-            
-            for (int moveIdx = 0; moveIdx < movesToMake; moveIdx++)
+            for (int m = 0; m < shape.MovesPerTurn          // Random(1, 2)
+                            && shape.GrowthQueue.Count > 0
+                            && unownedCount > 0; m++)
             {
-                if (shape.GrowthQueue.Count == 0) break;
-                
-                int currentIdx = shape.GrowthQueue.Dequeue();
-                var currentTri = gridBuilder.TriangleGameObjects[currentIdx]
-                    .GetComponent<Triangle>();
-                
-                // Use 3-priority neighbor selector
+                var current = shape.GrowthQueue.Dequeue();  // Queue<Triangle>
+
+                // 3-priority selector, then a retry from any owned triangle
                 if (NeighborSelector.TryPickNext(
-                    currentTri,
-                    pool,
-                    Shapes,
-                    gridBuilder.AllTriangles,
-                    shape.ShapeIndex,
-                    minTrianglesPerBox,
-                    out int pickedIdx,
-                    out _))
+                        current, shape, gridBuilder, minTrianglesPerBox, out var picked)
+                    || TryGrowFromAnyOwned(shape, current, out picked))
                 {
-                    var pickedTri = pool[pickedIdx];
-                    ClaimTriangle(pickedTri, shape);
-                    shape.GrowthQueue.Enqueue(gridBuilder.TriangleGameObjects
-                        .IndexOf(pickedTri.gameObject));
+                    ClaimTriangle(picked, shape);           // O(1): owner + count
+                    shape.GrowthQueue.Enqueue(picked);
                     anyProgress = true;
                 }
+                // else: this frontier triangle can't expand - drop it
             }
         }
     }
+
+    EnsureFullCoverage();   // BFS mop-up: 100% coverage, guaranteed
 }
 ```
 
@@ -245,34 +249,32 @@ void GrowShapes()
 
 **Solution:** Priority-based selection with entry/exit door logic.
 
+All grid queries go through `grid.TryGetTriangle(x, y, pos, out t)` (an O(1)
+dictionary) plus a bounds check — there is no linear scan of an "unowned pool".
+
 ```csharp
-// Main algorithm
 public static bool TryPickNext(
     Triangle current,
-    List<Triangle> pool,
-    List<ShapeData> shapes,
-    List<Triangle> allTriangles,
-    int currentGroupId,
+    ShapeData shape,
+    GridBuilder grid,
     int minTrianglesPerBox,
-    out int pickedIdx,
-    out bool canContinue)
+    out Triangle picked)
 {
-    // PRIORITY 1: Fill same cell first (respecting min rule)
-    if (TryPickFromSameCell(current, pool, shapes, currentGroupId, 
-        minTrianglesPerBox, out pickedIdx))
+    int group = shape.ShapeIndex;
+
+    // PRIORITY 1: fill the current cell first (up to minTrianglesPerBox)
+    if (TryPickFromSameCell(current, grid, group, minTrianglesPerBox, out picked))
         return true;
-    
-    // PRIORITY 2: Expand to adjacent cells (via entry/exit doors)
-    if (TryPickFromAdjacentCell(current, pool, shapes, allTriangles, 
-        currentGroupId, out pickedIdx))
+
+    // PRIORITY 2: step into an adjacent cell through a matching entry/exit door
+    if (TryPickFromAdjacentCell(current, grid, group, out picked))
         return true;
-    
-    // PRIORITY 3: Final attempt (fill ANY owned box)
-    if (TryPickFromAnyOwnedBoxFinalAttempt(shapes, currentGroupId, 
-        pool, out pickedIdx))
+
+    // PRIORITY 3: fill any empty position in a cell the shape already owns
+    if (TryPickFromAnyOwnedCell(shape, grid, out picked))
         return true;
-    
-    canContinue = false;
+
+    picked = null;
     return false;
 }
 ```
@@ -280,10 +282,10 @@ public static bool TryPickNext(
 #### Entry/Exit Door Logic
 ```csharp
 // Only expand via matching positions
-static int GetExitDoorPosition(Vector2Int from, Vector2Int to)
+static int GetExitDoorPosition(int fromX, int fromY, int toX, int toY)
 {
-    int dx = to.x - from.x;
-    int dy = to.y - from.y;
+    int dx = toX - fromX;
+    int dy = toY - fromY;
     
     // Up (1) ↔ Down (4), Right (2) ↔ Left (3)
     if (dx == 1) return 2;   // Moving RIGHT: exit via RIGHT
@@ -455,24 +457,30 @@ Edit `Assets/levels.json`:
 {
   "levels": [
     {
-      "levelId": "easy-1",
+      "levelId": "level-1",
       "difficulty": "easy",
       "gridWidth": 4,
       "gridHeight": 4,
       "shapeCount": 5,
-      "minTrianglesPerBox": 3
+      "minTrianglesPerBox": 4,
+      "seedMinCellDistance": 1
     },
     {
-      "levelId": "hard-1",
+      "levelId": "level-7",
       "difficulty": "hard",
       "gridWidth": 6,
       "gridHeight": 6,
       "shapeCount": 10,
-      "minTrianglesPerBox": 4
+      "minTrianglesPerBox": 3,
+      "seedMinCellDistance": 1
     }
   ]
 }
 ```
+
+Level ids are `level-1` … `level-9` (three per difficulty). `LevelData.IsValid()`
+enforces the ranges: grid 4–6, `shapeCount` 5–12, `minTrianglesPerBox` 2–4,
+`seedMinCellDistance` 1–3.
 
 ### Modify Colors
 1. Create new ColorPaletteSO in `Assets/Resources/`
@@ -487,10 +495,11 @@ Edit `Assets/levels.json`:
 
 | Parameter | Type | Effect |
 |-----------|------|--------|
-| `gridWidth` | int | Grid width in squares |
-| `gridHeight` | int | Grid height in squares |
-| `shapeCount` | int | Number of shapes to generate |
-| `minTrianglesPerBox` | int | Min triangles per square (compact vs sprawling) |
+| `gridWidth` | int | Grid width in squares (4–6) |
+| `gridHeight` | int | Grid height in squares (4–6) |
+| `shapeCount` | int | Number of shapes to generate (5–12) |
+| `minTrianglesPerBox` | int | Min triangles per square before a shape spreads (2–4) |
+| `seedMinCellDistance` | int | Preferred spacing between shape seeds (1–3); relaxed automatically if the grid can't fit that many |
 
 ### Loading Levels
 
@@ -613,8 +622,9 @@ Assert.AreEqual(totalTriangles, ownedTriangles);
 
 ### Add New Neighbor Selection Rule
 1. Add method to `NeighborSelector` (e.g., `TryPickFromDiagonal()`)
-2. Insert in priority chain before/after existing priorities
-3. Test with `PickDistributedSeeds()` to verify coverage
+2. Insert in the `TryPickNext` priority chain before/after existing priorities
+3. Run the PlayMode `ShapeGenerationTests` to confirm 100% coverage and a clean
+   disjoint partition still hold for every level config
 
 ### Add New Difficulty Tier
 1. Add entry to `levels.json` with custom parameters
