@@ -10,6 +10,10 @@ namespace Yunus.Game.Gameplay
     public Facing facing;              // Up, Left, Down, Right
     public int posIndex;               // Up=1, Right=2, Left=3, Down=4
     public bool isSnapped;
+
+    /// <summary>Index of the shape that owns this triangle during generation; -1 = unowned.</summary>
+    public int ownerShapeIndex = -1;
+
     public enum Facing { Up = 1, Left = 3, Down = 4, Right = 2 }
     public Vector2Int gridPos => new Vector2Int(x, y);
     public void Init(int x, int y, float angle, int box = -1)
@@ -19,6 +23,7 @@ namespace Yunus.Game.Gameplay
         this.boxIndex = box;
         SetAngle(angle);
         isSnapped = false;
+        ownerShapeIndex = -1;
     }
 
     public void SetAngle(float newAngle)

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 using Yunus.Game.Core;
 using Yunus.Game.Domain.Ports;
@@ -6,20 +6,19 @@ using Yunus.Game.Gameplay;
 namespace Yunus.Game.Generation
 {
     /// <summary>
-    /// Generates puzzle shapes procedurally using multi-seed BFS-like growth algorithm.
-    /// 
+    /// Generates puzzle shapes procedurally using a multi-seed, BFS-like growth algorithm.
+    ///
     /// ALGORITHM OVERVIEW:
-    /// 1. Seeds are distributed across grid (corners → edges → center)
-    /// 2. Each seed becomes root of a shape
-    /// 3. Shapes grow simultaneously in turn-based fashion
-    /// 4. Growth uses 3-priority neighbor selection to fill grid evenly
-    /// 5. Guaranteed 100% grid coverage with balanced shape sizes
-    /// 
-    /// WHY MULTI-SEED?
-    /// - Single seed cannot distribute evenly across entire grid
-    /// - Multi-seed provides natural, balanced partition
-    /// - Reduces dead-zones and ensures every triangle is claimed
-    /// - Different seed positions = different puzzle each run
+    /// 1. Seeds are distributed across the grid (corners → edges → centre) by
+    ///    <see cref="SeedCellSelector"/>.
+    /// 2. Each seed becomes the root of a shape.
+    /// 3. Shapes grow simultaneously, turn-based, via <see cref="NeighborSelector"/>'s 3-priority
+    ///    rules.
+    /// 4. <see cref="EnsureFullCoverage"/> then claims every triangle the growth phase missed, so
+    ///    coverage is 100% by construction.
+    ///
+    /// Ownership lives on <see cref="Triangle.ownerShapeIndex"/>; a running <c>_unownedCount</c>
+    /// replaces the old per-move rebuild of an "unowned pool", making each claim O(1).
     /// </summary>
     public class ShapeGenerator
     {
@@ -36,9 +35,13 @@ namespace Yunus.Game.Generation
         public bool PreSeedCorners { get; set; }
         private int minTrianglesPerBox;
 
-        // Randomness source for seed placement. A dedicated instance keeps seed selection
-        // independent of other UnityEngine.Random consumers and easy to reason about.
-        private readonly System.Random seedRng = new System.Random();
+        // Randomness source for seed placement. Injectable so tests can make generation
+        // reproducible; defaults to a fresh instance for "different every run".
+        private readonly System.Random seedRng;
+
+        // Live generation bookkeeping.
+        private int unownedCount;
+        private ShapeData[] shapeByIndex = System.Array.Empty<ShapeData>();
 
         // Output
         public List<ShapeData> Shapes { get; private set; }
@@ -51,13 +54,15 @@ namespace Yunus.Game.Generation
             IPrefabPool shapePool,
             Transform parent,
             IColorPalette colorPalette = null,
-            int minTrianglesPerBox = 4)
+            int minTrianglesPerBox = 4,
+            System.Random seedRng = null)
         {
             this.gridBuilder = gridBuilder;
             this.shapePool = shapePool;
             this.parentTransform = parent;
             this.colorPalette = colorPalette;
             this.minTrianglesPerBox = minTrianglesPerBox;
+            this.seedRng = seedRng ?? new System.Random();
 
             Shapes = new List<ShapeData>();
             ShapeCount = 6;
@@ -66,14 +71,8 @@ namespace Yunus.Game.Generation
         }
 
         /// <summary>
-        /// Main generation pipeline: picks seeds, creates shapes, grows them to fill grid.
-        /// 
-        /// STEPS:
-        /// 1. Shuffle color palette (different colors each run)
-        /// 2. Pick well-distributed seeds (far from each other)
-        /// 3. Instantiate shape GameObjects at seed positions
-        /// 4. Run multi-round growth until grid is filled
-        /// 5. Output: List of complete, non-overlapping shapes
+        /// Main generation pipeline: picks seeds, creates shapes, grows them, then guarantees a
+        /// fully covered grid.
         /// </summary>
         public void GenerateShapes()
         {
@@ -81,7 +80,9 @@ namespace Yunus.Game.Generation
             Shapes.Clear();
 
             int K = ShapeCount;
-            if (gridBuilder.TriangleGameObjects.Count == 0 || K <= 0) return;
+            if (gridBuilder.AllTriangles.Count == 0 || K <= 0) return;
+
+            unownedCount = gridBuilder.AllTriangles.Count;
 
             var seeds = PickDistributedSeeds(K);
             if (seeds.Count == 0)
@@ -97,30 +98,28 @@ namespace Yunus.Game.Generation
                     "generating with the smaller count.");
             }
 
+            shapeByIndex = new ShapeData[seeds.Count];
             for (int i = 0; i < seeds.Count; i++)
             {
                 var shape = CreateShape(i, seeds[i]);
                 Shapes.Add(shape);
+                shapeByIndex[i] = shape;
             }
 
             GrowShapes();
+            EnsureFullCoverage();
 
-            Debug.Log($"[ShapeGenerator] Generated {Shapes.Count} shapes (minTrianglesPerBox: {minTrianglesPerBox})");
+            Debug.Log(
+                $"[ShapeGenerator] Generated {Shapes.Count} shapes covering " +
+                $"{gridBuilder.AllTriangles.Count - unownedCount}/{gridBuilder.AllTriangles.Count} " +
+                $"triangles (minTrianglesPerBox: {minTrianglesPerBox})");
         }
 
         /// <summary>
-        /// Creates a new shape with a single seed triangle.
-        /// 
-        /// STEPS:
-        /// 1. Spawn shape root GameObject from pool
-        /// 2. Assign unique index and color
-        /// 3. Move seed triangle as child of shape
-        /// 4. Color seed triangle with shape color
-        /// 5. Register seed in growth queue
+        /// Creates a new shape rooted on a single seed triangle.
         /// </summary>
-        ShapeData CreateShape(int index, int seedTriangleIndex)
+        ShapeData CreateShape(int index, Triangle seedTri)
         {
-            // Spawn shape root from pool
             var root = shapePool.SpawnImmediate(Vector3.zero, Quaternion.identity, parentTransform);
             root.name = $"Shape_{index:D2}";
             root.SetActive(true);
@@ -130,38 +129,22 @@ namespace Yunus.Game.Generation
             shapeData.ShapeColor = PickColor(index);
             shapeData.MovesPerTurn = Random.Range(1, 3);
 
-            var seedGO = gridBuilder.TriangleGameObjects[seedTriangleIndex];
-            seedGO.transform.SetParent(root.transform, true);
-            ColorTriangle(seedGO, shapeData.ShapeColor);
-
-            var seedTri = seedGO.GetComponent<Triangle>();
-            shapeData.RegisterTriangle(seedTri);
-            shapeData.GrowthQueue.Enqueue(seedTriangleIndex);
+            ClaimTriangle(seedTri, shapeData);
+            shapeData.GrowthQueue.Enqueue(seedTri);
 
             return shapeData;
         }
 
         /// <summary>
-        /// Grows all shapes simultaneously using turn-based expansion.
-        /// 
-        /// ALGORITHM:
-        /// 1. Each shape gets a turn to expand by MovesPerTurn triangles
-        /// 2. For each move: pop triangle from growth queue
-        /// 3. Find valid neighbor using 3-priority selector
-        /// 4. Claim neighbor (parent, color, register)
-        /// 5. Add neighbor to growth queue
-        /// 6. Repeat until all shapes can't expand (grid filled)
-        /// 
-        /// GUARANTEES:
-        /// - 100% grid coverage (Priority 3 = final fallback)
-        /// - Balanced shape sizes (turn-based prevents hogging)
-        /// - Varied results (MovesPerTurn randomized)
+        /// Grows all shapes simultaneously using turn-based expansion until no shape can expand
+        /// (or the grid is full). Any triangles left over are handled by
+        /// <see cref="EnsureFullCoverage"/>.
         /// </summary>
         void GrowShapes()
         {
             bool anyProgress = true;
 
-            while (anyProgress)
+            while (anyProgress && unownedCount > 0)
             {
                 anyProgress = false;
 
@@ -173,130 +156,159 @@ namespace Yunus.Game.Generation
 
                     for (int moveIdx = 0; moveIdx < movesToMake; moveIdx++)
                     {
-                        if (shape.GrowthQueue.Count == 0) break;
+                        if (shape.GrowthQueue.Count == 0 || unownedCount == 0) break;
 
-                        int currentIdx = shape.GrowthQueue.Dequeue();
-                        var currentTri = gridBuilder.TriangleGameObjects[currentIdx].GetComponent<Triangle>();
-
-                        var pool = GetUnownedTriangles();
-                        if (pool.Count == 0) continue;
+                        var currentTri = shape.GrowthQueue.Dequeue();
 
                         if (NeighborSelector.TryPickNext(
-                            currentTri,
-                            pool,
-                            Shapes,
-                            gridBuilder.AllTriangles,
-                            shape.ShapeIndex,
-                            minTrianglesPerBox,
-                            out int pickedIdx,
-                            out _))
+                                currentTri, shape, gridBuilder, minTrianglesPerBox, out var picked))
                         {
-                            var pickedTri = pool[pickedIdx];
-                            ClaimTriangle(pickedTri, shape);
-
-                            int globalIdx = gridBuilder.TriangleGameObjects.IndexOf(pickedTri.gameObject);
-                            shape.GrowthQueue.Enqueue(globalIdx);
+                            ClaimTriangle(picked, shape);
+                            shape.GrowthQueue.Enqueue(picked);
                             anyProgress = true;
                         }
-                        else
+                        else if (TryGrowFromAnyOwned(shape, currentTri, out var fallback))
                         {
-                            if (TryGrowFromAnyOwned(shape, currentTri, out var picked))
-                            {
-                                ClaimTriangle(picked, shape);
-
-                                int globalIdx = gridBuilder.TriangleGameObjects.IndexOf(picked.gameObject);
-                                shape.GrowthQueue.Enqueue(globalIdx);
-                                anyProgress = true;
-                            }
+                            ClaimTriangle(fallback, shape);
+                            shape.GrowthQueue.Enqueue(fallback);
+                            anyProgress = true;
                         }
+                        // else: this frontier triangle can't expand - drop it (EnsureFullCoverage
+                        // will mop up anything this leaves behind).
                     }
                 }
             }
         }
 
         /// <summary>
-        /// Attempts to claim a neighbor triangle for a shape.
-        /// Uses 3-priority neighbor selection to ensure coverage.
+        /// Retries neighbour selection from every triangle the shape already owns (except the one
+        /// that just failed), in case a different frontier position can still expand.
         /// </summary>
         bool TryGrowFromAnyOwned(ShapeData shape, Triangle exclude, out Triangle picked)
         {
             picked = null;
-            var pool = GetUnownedTriangles();
-            if (pool.Count == 0) return false;
+            if (unownedCount == 0) return false;
 
-            foreach (var tri in shape.OccupiedTriangles)
+            var owned = shape.OccupiedTriangles;
+            for (int i = 0; i < owned.Count; i++)
             {
-                if (tri == exclude) continue;
+                var tri = owned[i];
+                if (tri == null || tri == exclude) continue;
 
                 if (NeighborSelector.TryPickNext(
-                    tri,
-                    pool,
-                    Shapes,
-                    gridBuilder.AllTriangles,
-                    shape.ShapeIndex,
-                    minTrianglesPerBox,
-                    out int idx,
-                    out _))
-                {
-                    picked = pool[idx];
+                        tri, shape, gridBuilder, minTrianglesPerBox, out picked))
                     return true;
-                }
             }
 
             return false;
         }
 
         /// <summary>
-        /// Claims a triangle for a shape (parent, color, register).
+        /// Guarantees 100% coverage: BFS from the frontier of owned triangles, assigning every
+        /// still-unowned triangle to an adjacent shape. The grid triangle-graph is connected and
+        /// every shape has a seed, so this always drains <c>unownedCount</c> to zero.
+        /// </summary>
+        void EnsureFullCoverage()
+        {
+            if (unownedCount <= 0 || Shapes.Count == 0) return;
+
+            var queue = new Queue<Triangle>();
+            foreach (var tri in gridBuilder.AllTriangles)
+                if (tri.ownerShapeIndex < 0 && TryGetOwnedAdjacentShape(tri, out _))
+                    queue.Enqueue(tri);
+
+            while (unownedCount > 0 && queue.Count > 0)
+            {
+                var tri = queue.Dequeue();
+                if (tri.ownerShapeIndex >= 0) continue;
+                if (!TryGetOwnedAdjacentShape(tri, out var shape)) continue;
+
+                ClaimTriangle(tri, shape);
+
+                foreach (var nb in NeighborTriangles(tri))
+                    if (nb.ownerShapeIndex < 0) queue.Enqueue(nb);
+            }
+
+            if (unownedCount > 0)
+            {
+                // Unreachable on a connected grid with >=1 shape; kept as a hard guarantee.
+                foreach (var tri in gridBuilder.AllTriangles)
+                    if (tri.ownerShapeIndex < 0) ClaimTriangle(tri, Shapes[0]);
+
+                Debug.LogWarning(
+                    "[ShapeGenerator] Coverage sweep found an isolated pocket; force-assigned the remainder.");
+            }
+        }
+
+        /// <summary>First shape that owns a triangle adjacent to <paramref name="tri"/>.</summary>
+        bool TryGetOwnedAdjacentShape(Triangle tri, out ShapeData shape)
+        {
+            foreach (var nb in NeighborTriangles(tri))
+            {
+                if (nb.ownerShapeIndex >= 0 && nb.ownerShapeIndex < shapeByIndex.Length)
+                {
+                    shape = shapeByIndex[nb.ownerShapeIndex];
+                    if (shape != null) return true;
+                }
+            }
+
+            shape = null;
+            return false;
+        }
+
+        /// <summary>
+        /// The (up to) four triangles adjacent to <paramref name="tri"/>: its three same-cell
+        /// siblings plus the one triangle it faces in the neighbouring cell.
+        /// </summary>
+        IEnumerable<Triangle> NeighborTriangles(Triangle tri)
+        {
+            for (int pos = 1; pos <= 4; pos++)
+            {
+                if (pos == tri.posIndex) continue;
+                if (gridBuilder.TryGetTriangle(tri.x, tri.y, pos, out var sibling))
+                    yield return sibling;
+            }
+
+            var off = FacingOffset(tri.posIndex);
+            int nx = tri.x + off.x, ny = tri.y + off.y;
+            if (gridBuilder.TryGetTriangle(nx, ny, Triangle.OppositePosIndex(tri.posIndex), out var facing))
+                yield return facing;
+        }
+
+        static Vector2Int FacingOffset(int posIndex) => posIndex switch
+        {
+            1 => new Vector2Int(0, 1),   // Up
+            2 => new Vector2Int(1, 0),   // Right
+            3 => new Vector2Int(-1, 0),  // Left
+            4 => new Vector2Int(0, -1),  // Down
+            _ => Vector2Int.zero
+        };
+
+        /// <summary>
+        /// Claims a triangle for a shape: records ownership, reparents, colours, registers.
         /// </summary>
         void ClaimTriangle(Triangle tri, ShapeData shape)
         {
-            tri.gameObject.transform.SetParent(shape.transform, true);
+            if (tri.ownerShapeIndex < 0) unownedCount--;
+            tri.ownerShapeIndex = shape.ShapeIndex;
+
+            tri.transform.SetParent(shape.transform, true);
             ColorTriangle(tri.gameObject, shape.ShapeColor);
             shape.RegisterTriangle(tri);
         }
 
         /// <summary>
-        /// Gets all triangles not yet owned by any shape.
-        /// </summary>
-        List<Triangle> GetUnownedTriangles()
-        {
-            var owned = new HashSet<Triangle>();
-            foreach (var shape in Shapes)
-            {
-                if (shape == null) continue;
-                foreach (var tri in shape.OccupiedTriangles)
-                    if (tri != null) owned.Add(tri);
-            }
-
-            var pool = new List<Triangle>();
-            foreach (var go in gridBuilder.TriangleGameObjects)
-            {
-                var tri = go.GetComponent<Triangle>();
-                if (tri != null && !owned.Contains(tri))
-                    pool.Add(tri);
-            }
-
-            return pool;
-        }
-
-        /// <summary>
-        /// Applies shape color to a triangle using TriangleMeshRenderer.
-        /// Custom renderer handles vertex colors and MaterialPropertyBlock updates.
+        /// Applies shape color to a triangle using TriangleMeshRenderer, when present.
         /// </summary>
         void ColorTriangle(GameObject go, Color color)
         {
-            // Use TriangleMeshRenderer instead of Shapes.Triangle
             var meshRenderer = go.GetComponent<TriangleMeshRenderer>();
             if (meshRenderer != null)
-            {
                 meshRenderer.SetColor(color);
-            }
         }
 
         /// <summary>
-        /// Picks color for shape by index from palette.
-        /// Falls back to random HSV if no palette available.
+        /// Picks color for shape by index from palette. Falls back to random HSV if no palette.
         /// </summary>
         Color PickColor(int index)
         {
@@ -315,9 +327,9 @@ namespace Yunus.Game.Generation
         /// Cell selection is delegated to <see cref="SeedCellSelector"/>, which always returns
         /// exactly <c>min(K, cellCount)</c> distinct, in-bounds cells - it honours
         /// <see cref="SeedMinCellDistance"/> where the grid allows and relaxes it otherwise. Each
-        /// chosen cell is mapped to a concrete triangle index via <see cref="FindBestTriangleAt"/>.
+        /// chosen cell is mapped to a concrete triangle via <see cref="FindTriangleAt"/>.
         /// </summary>
-        List<int> PickDistributedSeeds(int K)
+        List<Triangle> PickDistributedSeeds(int K)
         {
             var cells = SeedCellSelector.Select(
                 gridBuilder.GridWidth,
@@ -327,27 +339,24 @@ namespace Yunus.Game.Generation
                 PreSeedCorners,
                 seedRng);
 
-            var seeds = new List<int>(cells.Count);
+            var seeds = new List<Triangle>(cells.Count);
             foreach (var cell in cells)
             {
-                int triIdx = FindBestTriangleAt(cell.x, cell.y);
-                if (triIdx >= 0) seeds.Add(triIdx);
+                var tri = FindTriangleAt(cell.x, cell.y);
+                if (tri != null) seeds.Add(tri);
             }
 
             return seeds;
         }
 
-        int FindBestTriangleAt(int x, int y)
+        /// <summary>Any triangle in cell (<paramref name="x"/>, <paramref name="y"/>).</summary>
+        Triangle FindTriangleAt(int x, int y)
         {
-            Vector2Int target = new(x, y);
+            for (int pos = 1; pos <= 4; pos++)
+                if (gridBuilder.TryGetTriangle(x, y, pos, out var tri))
+                    return tri;
 
-            for (int i = 0; i < gridBuilder.TriangleGameObjects.Count; i++)
-            {
-                var tri = gridBuilder.TriangleGameObjects[i].GetComponent<Triangle>();
-                if (tri.gridPos == target) return i;
-            }
-
-            return -1;
+            return null;
         }
 
         /// <summary>
@@ -359,6 +368,7 @@ namespace Yunus.Game.Generation
                 if (shape != null) shapePool.Despawn(shape.gameObject);
 
             Shapes.Clear();
+            shapeByIndex = System.Array.Empty<ShapeData>();
         }
     }
 }

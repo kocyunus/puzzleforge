@@ -1,0 +1,17 @@
+{
+    "name": "PuzzleForge.Runtime",
+    "rootNamespace": "Yunus.Game",
+    "references": [
+        "Unity.Mathematics",
+        "PuzzleForge.Generation.Seeding"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
