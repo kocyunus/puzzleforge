@@ -50,7 +50,7 @@
       "difficulty": "medium",
       "gridWidth": 5,
       "gridHeight": 5,
-      "shapeCount": 9,
+      "shapeCount": 8,
       "minTrianglesPerBox": 4,
       "seedMinCellDistance": 2
     },
@@ -61,7 +61,7 @@
       "gridHeight": 6,
       "shapeCount": 10,
       "minTrianglesPerBox": 3,
-      "seedMinCellDistance": 2
+      "seedMinCellDistance": 1
     },
     {
       "levelId": "level-8",

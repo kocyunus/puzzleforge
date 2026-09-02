@@ -36,6 +36,10 @@ namespace Yunus.Game.Generation
         public bool PreSeedCorners { get; set; }
         private int minTrianglesPerBox;
 
+        // Randomness source for seed placement. A dedicated instance keeps seed selection
+        // independent of other UnityEngine.Random consumers and easy to reason about.
+        private readonly System.Random seedRng = new System.Random();
+
         // Output
         public List<ShapeData> Shapes { get; private set; }
 
@@ -80,17 +84,28 @@ namespace Yunus.Game.Generation
             if (gridBuilder.TriangleGameObjects.Count == 0 || K <= 0) return;
 
             var seeds = PickDistributedSeeds(K);
-
-            for (int i = 0; i < K; i++)
+            if (seeds.Count == 0)
             {
-                
+                Debug.LogWarning("[ShapeGenerator] No seed cells available; nothing generated.");
+                return;
+            }
+
+            if (seeds.Count < K)
+            {
+                Debug.LogWarning(
+                    $"[ShapeGenerator] Grid only fits {seeds.Count} of {K} requested shapes; " +
+                    "generating with the smaller count.");
+            }
+
+            for (int i = 0; i < seeds.Count; i++)
+            {
                 var shape = CreateShape(i, seeds[i]);
                 Shapes.Add(shape);
             }
 
             GrowShapes();
 
-            Debug.Log($"[ShapeGenerator] Generated {K} shapes (minTrianglesPerBox: {minTrianglesPerBox})");
+            Debug.Log($"[ShapeGenerator] Generated {Shapes.Count} shapes (minTrianglesPerBox: {minTrianglesPerBox})");
         }
 
         /// <summary>
@@ -295,142 +310,31 @@ namespace Yunus.Game.Generation
         }
 
         /// <summary>
-        /// Selects well-distributed seed positions across the grid.
-        /// 
-        /// STRATEGY:
-        /// 1. Pre-seed corners (4 corner cells)
-        /// 2. Distribute remaining seeds using far-first selection
-        /// 3. Maintain minimum distance between seeds
-        /// 4. Alternate between edge and center cells for variety
+        /// Selects well-distributed seed triangles across the grid.
+        ///
+        /// Cell selection is delegated to <see cref="SeedCellSelector"/>, which always returns
+        /// exactly <c>min(K, cellCount)</c> distinct, in-bounds cells - it honours
+        /// <see cref="SeedMinCellDistance"/> where the grid allows and relaxes it otherwise. Each
+        /// chosen cell is mapped to a concrete triangle index via <see cref="FindBestTriangleAt"/>.
         /// </summary>
         List<int> PickDistributedSeeds(int K)
         {
-            var seeds = new List<int>();
-            var usedCells = new HashSet<long>();
-            var chosenCells = new List<Vector2Int>();
+            var cells = SeedCellSelector.Select(
+                gridBuilder.GridWidth,
+                gridBuilder.GridHeight,
+                K,
+                SeedMinCellDistance,
+                PreSeedCorners,
+                seedRng);
 
-            var corners = new List<Vector2Int>
+            var seeds = new List<int>(cells.Count);
+            foreach (var cell in cells)
             {
-                new(0, 0),
-                new(gridBuilder.GridWidth - 1, 0),
-                new(0, gridBuilder.GridHeight - 1),
-                new(gridBuilder.GridWidth - 1, gridBuilder.GridHeight - 1),
-            };
-
-            var edges = new List<Vector2Int>();
-            var centers = new List<Vector2Int>();
-
-            for (int y = 0; y < gridBuilder.GridHeight; y++)
-            {
-                for (int x = 0; x < gridBuilder.GridWidth; x++)
-                {
-                    bool isCorner = (x == 0 || x == gridBuilder.GridWidth - 1) &&
-                                    (y == 0 || y == gridBuilder.GridHeight - 1);
-                    bool isEdge = x == 0 || y == 0 || x == gridBuilder.GridWidth - 1 || y == gridBuilder.GridHeight - 1;
-
-                    if (isCorner) continue;
-                    if (isEdge) edges.Add(new(x, y));
-                    else centers.Add(new(x, y));
-                }
-            }
-
-            if (PreSeedCorners && K > 0)
-            {
-                Shuffle(corners);
-                foreach (var corner in corners)
-                {
-                    if (seeds.Count >= Mathf.Min(K, 4)) break;
-                    if (TryAddSeed(corner, usedCells, chosenCells, out int idx))
-                        seeds.Add(idx);
-                }
-            }
-
-            Shuffle(edges);
-            Shuffle(centers);
-
-            int phase = Random.Range(0, 2);
-
-            while (seeds.Count < K)
-            {
-                bool pickEdge = ((seeds.Count + phase) % 2) == 0;
-                var primary = pickEdge ? edges : centers;
-                var secondary = pickEdge ? centers : edges;
-
-                var chosen = PickBest(primary, usedCells, chosenCells);
-                if (chosen.x < 0) chosen = PickBest(secondary, usedCells, chosenCells);
-                if (chosen.x < 0) break;
-
-                if (TryAddSeed(chosen, usedCells, chosenCells, out int idx))
-                    seeds.Add(idx);
+                int triIdx = FindBestTriangleAt(cell.x, cell.y);
+                if (triIdx >= 0) seeds.Add(triIdx);
             }
 
             return seeds;
-        }
-
-        bool TryAddSeed(Vector2Int cell, HashSet<long> used, List<Vector2Int> chosen, out int triIdx)
-        {
-            triIdx = -1;
-            long key = PackCell(cell.x, cell.y);
-
-            if (used.Contains(key)) return false;
-
-            triIdx = FindBestTriangleAt(cell.x, cell.y);
-            if (triIdx < 0) return false;
-
-            used.Add(key);
-            chosen.Add(cell);
-            return true;
-        }
-
-        Vector2Int PickBest(List<Vector2Int> candidates, HashSet<long> used, List<Vector2Int> chosen)
-        {
-            if (candidates == null || candidates.Count == 0) return new(-1, -1);
-
-            Vector2Int best = new(-1, -1);
-            float bestScore = -1;
-
-            foreach (var p in candidates)
-            {
-                if (used.Contains(PackCell(p.x, p.y))) continue;
-                if (!IsFarEnough(p, chosen)) continue;
-
-                float score = MinDist2(p, chosen);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    best = p;
-                }
-            }
-
-            return best;
-        }
-
-        bool IsFarEnough(Vector2Int p, List<Vector2Int> chosen)
-        {
-            if (chosen.Count == 0) return true;
-
-            foreach (var c in chosen)
-            {
-                int d = Mathf.Max(Mathf.Abs(p.x - c.x), Mathf.Abs(p.y - c.y));
-                if (d < SeedMinCellDistance) return false;
-            }
-
-            return true;
-        }
-
-        float MinDist2(Vector2Int p, List<Vector2Int> chosen)
-        {
-            if (chosen.Count == 0) return float.PositiveInfinity;
-
-            float best = float.PositiveInfinity;
-            foreach (var c in chosen)
-            {
-                int dx = p.x - c.x, dy = p.y - c.y;
-                float d2 = dx * dx + dy * dy;
-                if (d2 < best) best = d2;
-            }
-
-            return best;
         }
 
         int FindBestTriangleAt(int x, int y)
@@ -445,17 +349,6 @@ namespace Yunus.Game.Generation
 
             return -1;
         }
-
-        void Shuffle<T>(List<T> list)
-        {
-            for (int i = list.Count - 1; i > 0; i--)
-            {
-                int j = Random.Range(0, i + 1);
-                (list[i], list[j]) = (list[j], list[i]);
-            }
-        }
-
-        long PackCell(int x, int y) => ((long)x << 32) | (uint)y;
 
         /// <summary>
         /// Clears all generated shapes and returns them to the pool.

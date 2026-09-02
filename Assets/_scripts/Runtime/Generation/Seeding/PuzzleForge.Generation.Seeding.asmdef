@@ -1,0 +1,14 @@
+{
+    "name": "PuzzleForge.Generation.Seeding",
+    "rootNamespace": "Yunus.Game.Generation",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
