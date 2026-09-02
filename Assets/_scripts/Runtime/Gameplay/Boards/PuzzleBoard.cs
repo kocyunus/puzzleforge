@@ -53,7 +53,7 @@ namespace Yunus.Game.Board
             totalPiecesNeeded = levelData.shapeCount;
             placedPieceCount = 0;
 
-            Debug.Log($"[PuzzleBoard] Initialized: {levelData.gridWidth}×{levelData.gridHeight}, need {totalPiecesNeeded} pieces");
+            GameLog.Info($"[PuzzleBoard] Initialized: {levelData.gridWidth}×{levelData.gridHeight}, need {totalPiecesNeeded} pieces");
         }
 
         void BuildSolutionGrid()
@@ -83,7 +83,7 @@ namespace Yunus.Game.Board
 
             TintAllTriangles(baseColor);
 
-            Debug.Log($"[PuzzleBoard] Solution grid built: {TotalSlots} slots");
+            GameLog.Info($"[PuzzleBoard] Solution grid built: {TotalSlots} slots");
         }
  
         public void ClearGrid()
@@ -114,7 +114,7 @@ namespace Yunus.Game.Board
 
             if (IsPuzzleComplete)
             {
-                Debug.Log("[PuzzleBoard] 🎉 PUZZLE COMPLETE!");
+                GameLog.Info("[PuzzleBoard] 🎉 PUZZLE COMPLETE!");
                 OnPuzzleComplete();
             }
         }

@@ -51,7 +51,7 @@ namespace Yunus.Game
             ServiceLocator.Register<IPrefabPooler>(new PrefabPoolerService());
 
             ServiceLocator.Register<IShapeScatter>(new ShapeScatterService());
-            Debug.Log("[GameBootstrap] ✅ Services registered");
+            GameLog.Info("[GameBootstrap] ✅ Services registered");
         }
     }
 }

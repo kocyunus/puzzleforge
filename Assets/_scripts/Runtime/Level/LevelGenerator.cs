@@ -32,7 +32,7 @@ namespace Yunus.Game.Level
     public void Initialize(LevelData levelData)
     {
         currentLevel = levelData;
-        Debug.Log($"[LevelGenerator] Initialized with: {currentLevel}");
+        GameLog.Info($"[LevelGenerator] Initialized with: {currentLevel}");
     }
 
     public void GenerateLevel()
@@ -84,19 +84,19 @@ namespace Yunus.Game.Level
         shapeGenerator.GenerateShapes();
         ScatterShapes();
 
-        Debug.Log($"[LevelGenerator] ✅ Generated: {gridBuilder.AllTriangles.Count} triangles, {shapeGenerator.Shapes.Count} shapes");
+        GameLog.Info($"[LevelGenerator] ✅ Generated: {gridBuilder.AllTriangles.Count} triangles, {shapeGenerator.Shapes.Count} shapes");
     }
 
     public void ClearGrid()
     {
         gridBuilder?.DeSpawn();   // Returns grid objects to pool
-        Debug.Log("[LevelGenerator] Cleared grid.");
+        GameLog.Info("[LevelGenerator] Cleared grid.");
     }
 
     public void ClearShapes()
     {
         shapeGenerator?.Clear();  // Returns shape roots to pool
-        Debug.Log("[LevelGenerator] Cleared shapes.");
+        GameLog.Info("[LevelGenerator] Cleared shapes.");
     }
 
     private void ScatterShapes(

@@ -2,6 +2,7 @@
 using System.Collections;
 using UnityEngine.Networking;
 using Yunus.Game.Board;
+using Yunus.Game.Core;
 
 namespace Yunus.Game.Level
 {
@@ -34,7 +35,7 @@ namespace Yunus.Game.Level
 
     IEnumerator InitializeGame()
     {
-        Debug.Log("[LevelManager] === GAME START ===");
+        GameLog.Info("[LevelManager] === GAME START ===");
 
         // 1. Load levels JSON
         yield return LoadLevelsJson();
@@ -57,19 +58,19 @@ namespace Yunus.Game.Level
         // 3. Initialize game
         InitializeLevel();
 
-        Debug.Log("[LevelManager] ✅ Game initialized successfully!");
+        GameLog.Info("[LevelManager] ✅ Game initialized successfully!");
     }
 
     IEnumerator LoadLevelsJson()
     {
         if (downloadFromServer)
         {
-            Debug.Log($"[LevelManager] Downloading from server: {serverUrl}");
+            GameLog.Info($"[LevelManager] Downloading from server: {serverUrl}");
             yield return DownloadFromServer();
         }
         else
         {
-            Debug.Log("[LevelManager] Loading from local file...");
+            GameLog.Info("[LevelManager] Loading from local file...");
             LoadFromLocal();
         }
     }
@@ -87,7 +88,7 @@ namespace Yunus.Game.Level
 
         if (levelsContainer != null && levelsContainer.levels != null)
         {
-            Debug.Log($"[LevelManager] ✅ Loaded {levelsContainer.levels.Count} levels from local file");
+            GameLog.Info($"[LevelManager] ✅ Loaded {levelsContainer.levels.Count} levels from local file");
         }
         else
         {
@@ -108,7 +109,7 @@ namespace Yunus.Game.Level
 
                 if (levelsContainer != null && levelsContainer.levels != null)
                 {
-                    Debug.Log($"[LevelManager] ✅ Downloaded {levelsContainer.levels.Count} levels from server");
+                    GameLog.Info($"[LevelManager] ✅ Downloaded {levelsContainer.levels.Count} levels from server");
                 }
                 else
                 {
@@ -130,18 +131,18 @@ namespace Yunus.Game.Level
         {
             // Specific level by ID
             currentLevel = levelsContainer.GetLevel(specificLevelId);
-            Debug.Log($"[LevelManager] Selected specific level: {specificLevelId}");
+            GameLog.Info($"[LevelManager] Selected specific level: {specificLevelId}");
         }
         else
         {
             // Random level by difficulty
             currentLevel = levelsContainer.GetRandomLevel(selectedDifficulty);
-            Debug.Log($"[LevelManager] Selected random {selectedDifficulty} level");
+            GameLog.Info($"[LevelManager] Selected random {selectedDifficulty} level");
         }
 
         if (currentLevel != null)
         {
-            Debug.Log($"[LevelManager] 🎮 LEVEL: {currentLevel}");
+            GameLog.Info($"[LevelManager] 🎮 LEVEL: {currentLevel}");
         }
     }
 
@@ -174,7 +175,7 @@ namespace Yunus.Game.Level
     /// </summary>
     public void LoadNextLevel()
     {
-        Debug.Log("[LevelManager] Loading next level...");
+        GameLog.Info("[LevelManager] Loading next level...");
         // Load new level
         StartCoroutine(InitializeGame());
     }
