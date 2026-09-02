@@ -86,10 +86,14 @@ Assets/_scripts/Runtime/
 │   └── Snapping/     # Snap-to-grid algorithm
 ├── Generation/        
 │   ├── Grid/         # GridBuilder
+│   ├── Seeding/      # SeedCellSelector (pure, unit-tested)
 │   └── Shapes/       # ShapeGenerator, NeighborSelector
 ├── Level/            # Level loading
 ├── Services/         # Infrastructure (pooling, etc)
 └── Ui/               # Minimal UI
+
+Assets/Tests/
+└── EditMode/          # NUnit EditMode tests (Unity Test Framework)
 ```
 
 ### Key Design Patterns
@@ -164,6 +168,10 @@ List<int> PickDistributedSeeds(int K)
 - Corners first → Natural starting points
 - Far-first selection → Balanced distribution
 - Minimum distance rule → Avoids clustering
+- Progressive relaxation → `SeedCellSelector` always returns exactly
+  `min(shapeCount, gridWidth × gridHeight)` cells: it honours the minimum
+  distance where the grid allows, then relaxes it step-by-step, then fills from
+  any free cell. Generation can never stall or crash on a tight config.
 
 #### Shape Growth Algorithm
 ```csharp
@@ -532,6 +540,26 @@ trianglePool.Despawn(tri);
 
 ---
 
+## 🧪 Tests
+
+Automated tests use the **Unity Test Framework** (NUnit). They live in
+`Assets/Tests/EditMode/` and run without entering Play mode.
+
+**Run them:**
+- Editor: `Window ▸ General ▸ Test Runner ▸ EditMode ▸ Run All`
+- CLI: `Unity -batchmode -runTests -testPlatform EditMode -projectPath . -logFile -`
+
+**Current coverage:**
+
+| Suite | What it checks |
+|-------|----------------|
+| `SeedCellSelectorTests` | Seed placement returns exactly `min(shapeCount, cells)` distinct in-bounds cells for every `levels.json` config (regression for the generation lock-up), plus min-distance, clamping, determinism, and degenerate inputs. |
+
+The seed logic is isolated in `SeedCellSelector` (its own assembly, no `MonoBehaviour`
+dependency) specifically so it can be unit-tested directly.
+
+---
+
 ## 🧪 Testing Your Own Implementation
 
 ### Test Determinism
@@ -594,6 +622,10 @@ Assert.AreEqual(totalTriangles, ownedTriangles);
 - **No Audio:** No music or effects
 - **No Undo:** No move history
 - **Single Player:** No multiplayer
+- **Grid fill not yet guaranteed:** `GrowShapes` usually fills 100% of the grid
+  but does not prove it; needs coverage tests + a deterministic fallback
+- **Growth is O(n²) per move:** `GrowShapes` rebuilds the unowned-triangle list
+  on every claim — fine at 6×6, worth optimising before larger grids
 
 ---
 
@@ -619,8 +651,8 @@ MIT License - See LICENSE file
 
 ---
 
-**Last Updated:** October 28, 2025  
-**Unity:** 2022.3+  
+**Last Updated:** September 2, 2026  
+**Unity:** 2022.3 LTS (tested on 2022.3.62f3)  
 **C#:** 9.0+
 
 ---
