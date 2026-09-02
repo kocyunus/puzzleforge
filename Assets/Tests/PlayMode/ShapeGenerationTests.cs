@@ -4,6 +4,8 @@ using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using Yunus.Game.Core;
+using Yunus.Game.Domain.Ports;
+using Yunus.Game.Domain.Value;
 using Yunus.Game.Gameplay;
 using Yunus.Game.Generation;
 
@@ -133,17 +135,34 @@ namespace Yunus.Game.Tests
                 "different seeds produced identical ownership");
         }
 
+        [Test]
+        public void Generate_WithAPalette_AssignsColoursDeterministically()
+        {
+            // IColorPalette.Shuffle now takes the generator's System.Random, so colour assignment
+            // is reproducible too.
+            List<Color> Colours(int seed)
+            {
+                using var run = Generate(6, 6, 10, 3, 1, seed, new FakePalette());
+                return run.Gen.Shapes.OrderBy(s => s.ShapeIndex).Select(s => s.ShapeColor).ToList();
+            }
+
+            CollectionAssert.AreEqual(Colours(7), Colours(7));
+            Assert.IsFalse(Colours(7).SequenceEqual(Colours(8)),
+                "different seeds produced identical colour assignment");
+        }
+
         // ---- helpers ----
 
         static (string name, int w, int h, int shapeCount, int minPerBox, int seedDist) Unpack(object[] c)
             => ((string)c[0], (int)c[1], (int)c[2], (int)c[3], (int)c[4], (int)c[5]);
 
-        Run Generate(int w, int h, int shapeCount, int minPerBox, int seedDist, int seed)
+        Run Generate(int w, int h, int shapeCount, int minPerBox, int seedDist, int seed,
+            IColorPalette palette = null)
         {
             var grid = new GridBuilder(_trianglePool, _root.transform, w, h);
             grid.BuildGrid();
 
-            var gen = new ShapeGenerator(grid, _shapePool, _root.transform, null, minPerBox,
+            var gen = new ShapeGenerator(grid, _shapePool, _root.transform, palette, minPerBox,
                 new System.Random(seed))
             {
                 ShapeCount = shapeCount,
@@ -153,6 +172,32 @@ namespace Yunus.Game.Tests
             gen.GenerateShapes();
 
             return new Run(grid, gen);
+        }
+
+        /// <summary>A deterministic 12-colour palette; <see cref="Shuffle"/> uses the given RNG.</summary>
+        sealed class FakePalette : IColorPalette
+        {
+            readonly Rgba[] _colours = Enumerable.Range(0, 12)
+                .Select(i => new Rgba(i / 12f, (i * 37 % 12) / 12f, (i * 71 % 12) / 12f))
+                .ToArray();
+            int _cursor;
+
+            public void Initialize() => _cursor = 0;
+            public void Clean() => _cursor = 0;
+            public int Count => _colours.Length;
+            public Rgba GetByIndex(int index) => _colours[((index % Count) + Count) % Count];
+            public Rgba Next() { var c = _colours[_cursor]; _cursor = (_cursor + 1) % Count; return c; }
+            public void ResetCycle() => _cursor = 0;
+
+            public void Shuffle(System.Random rng)
+            {
+                _cursor = 0;
+                for (int i = _colours.Length - 1; i > 0; i--)
+                {
+                    int j = rng.Next(0, i + 1);
+                    (_colours[i], _colours[j]) = (_colours[j], _colours[i]);
+                }
+            }
         }
 
         sealed class Run : IDisposable

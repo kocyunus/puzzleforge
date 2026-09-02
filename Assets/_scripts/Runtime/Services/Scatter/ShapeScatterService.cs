@@ -1,4 +1,3 @@
-// Services/ShapeScatterService.cs
 using System.Collections.Generic;
 using UnityEngine;
 using Yunus.Game.Gameplay;
@@ -17,7 +16,7 @@ namespace Yunus.Game.Services
             if (shapes == null || shapes.Count == 0) return;
             opts ??= new ShapeScatterOptions();
 
-            // alaný merkezden ölçekle (daha sýk dizilim için <1 ver)
+            // Shrink the area toward its centre for a tighter layout.
             if (opts.RectScale > 0f && opts.RectScale < 1f)
             {
                 var c = localRect.center;
@@ -26,7 +25,7 @@ namespace Yunus.Game.Services
                 localRect = new Rect(c.x - w * 0.5f, c.y - h * 0.5f, w, h);
             }
 
-            var rng = opts.Seed.HasValue ? new System.Random(opts.Seed.Value) : (_rng ?? new System.Random());
+            var rng = _rng ?? new System.Random();
             var placed = new List<Vector2>(shapes.Count);
             const int MaxTries = 64;
             float minSq = opts.MinSpacing * opts.MinSpacing;

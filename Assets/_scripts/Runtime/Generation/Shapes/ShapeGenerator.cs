@@ -35,10 +35,10 @@ namespace Yunus.Game.Generation
         public bool PreSeedCorners { get; set; }
         private int minTrianglesPerBox;
 
-        // The single randomness source for generation *topology* - seed placement, moves-per-turn,
-        // and neighbour tie-breaks all draw from it. Injectable so a run is fully reproducible from
-        // one seed; defaults to a fresh instance for "different every run". (Shape colour order
-        // still comes from IColorPalette.Shuffle, which is cosmetic and out of scope here.)
+        // The single randomness source for generation - seed placement, moves-per-turn, neighbour
+        // tie-breaks, and the palette shuffle / colour fallback all draw from it. Injectable so a
+        // whole run (topology *and* colours) is reproducible from one seed; defaults to a fresh
+        // instance for "different every run".
         private readonly System.Random rng;
 
         // Live generation bookkeeping.
@@ -78,7 +78,7 @@ namespace Yunus.Game.Generation
         /// </summary>
         public void GenerateShapes()
         {
-            colorPalette?.Shuffle();
+            colorPalette?.Shuffle(rng);
             Shapes.Clear();
 
             int K = ShapeCount;

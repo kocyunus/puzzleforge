@@ -1,198 +1,147 @@
-﻿using System.Collections.Generic;
 using UnityEngine;
 using Yunus.Game.Board;
+using Yunus.Game.Core;
 
 namespace Yunus.Game.Gameplay
 {
     /// <summary>
-    /// Handles drag and drop input for shape pieces: on mouse-down it grabs the
-    /// <see cref="ShapeData"/> root of whatever triangle was hit, drags it on a plane facing the
-    /// camera, and on mouse-up asks <see cref="SnapUtil"/> to snap it onto the puzzle board.
+    /// Mouse drag-and-drop for shape pieces. On mouse-down it grabs the <see cref="ShapeData"/>
+    /// root of whatever triangle was hit (2D physics), drags it on a plane facing the camera, and
+    /// on mouse-up asks <see cref="SnapUtil"/> to snap it onto the puzzle board.
     /// </summary>
     [DisallowMultipleComponent]
     public class DragTriangleParentInput : MonoBehaviour
-{
-    [Header("Camera")]
-    [SerializeField] private Camera cam;
-
-    [Header("References")]
-    [SerializeField] private PuzzleBoard puzzleBoard;
-
-    [Header("Snap Settings")]
-    [SerializeField] private bool snapToBoard = true;
-    [SerializeField] private bool revertIfNoSnap = false;
-
-    [Header("Debug")]
-    [SerializeField] private bool log = false;
-
-    // Drag state
-    private Transform draggingRoot;
-    private Vector3 dragOffset;
-    private Vector3 dragStartPos;
-    private int dragFrames;
-    private ShapeData currentShapeData;
-
-    // Raycast buffers
-    private static readonly RaycastHit2D[] hits2D = new RaycastHit2D[32];
-    private static readonly RaycastHit[] hits3D = new RaycastHit[32];
-
-    // Public API
-    public bool IsDragging => draggingRoot != null;
-    public ShapeData DraggingShape => currentShapeData;
-
-    void Awake()
     {
-        if (!cam) cam = Camera.main;
-    }
+        const float DragZ = -8f; // keep the dragged shape in front of the board while moving
 
-    void Update()
-    {
-        if (Input.GetMouseButtonDown(0)) TryBeginDrag();
-        if (Input.GetMouseButton(0) && draggingRoot) ContinueDrag();
-        if (Input.GetMouseButtonUp(0)) EndDrag();
-    }
+        [Header("Camera")]
+        [SerializeField] private Camera cam;
 
-    void TryBeginDrag()
-    {
-        Transform hitTransform = GetHitTransform();
-        if (!hitTransform) return;
+        [Header("References")]
+        [SerializeField] private PuzzleBoard puzzleBoard;
 
-        var root = hitTransform.parent ? hitTransform.parent : hitTransform;
+        [Header("Snap Settings")]
+        [SerializeField] private bool snapToBoard = true;
+        [SerializeField] private bool revertIfNoSnap = false;
 
-        currentShapeData = root.GetComponent<ShapeData>();
-        if (currentShapeData == null)
+        private Transform draggingRoot;
+        private Vector3 dragOffset;
+        private Vector3 dragStartPos;
+        private ShapeData currentShapeData;
+
+        private static readonly RaycastHit2D[] hitBuffer = new RaycastHit2D[32];
+
+        public bool IsDragging => draggingRoot != null;
+        public ShapeData DraggingShape => currentShapeData;
+
+        void Awake()
         {
-            if (log) Debug.LogWarning($"[DragInput] ShapeData not found on {root.name}");
-            return;
+            if (!cam) cam = Camera.main;
         }
 
-        draggingRoot = root;
-        dragStartPos = root.position;
-
-        if (currentShapeData.BoardSnappedTriangles.Count > 0)
+        void Update()
         {
-            puzzleBoard.OnShapeRemoved();
-            currentShapeData.ResetAllSnaps();
+            if (Input.GetMouseButtonDown(0)) TryBeginDrag();
+            if (Input.GetMouseButton(0) && draggingRoot) ContinueDrag();
+            if (Input.GetMouseButtonUp(0)) EndDrag();
         }
 
-        var mouseWorld = MouseOnDragPlane(draggingRoot);
-        dragOffset = mouseWorld - draggingRoot.position;
-        dragFrames = 0;
-
-        if (log) Debug.Log($"[DragInput] Begin drag: {draggingRoot.name}");
-    }
-
-    void ContinueDrag()
-    {
-        var mouseWorld = MouseOnDragPlane(draggingRoot);
-        // Z'yi -10'da tut
-        draggingRoot.position = new Vector3(
-            mouseWorld.x - dragOffset.x,
-            mouseWorld.y - dragOffset.y,
-            -8f
-        );
-        dragFrames++;
-    }
-    void EndDrag()
-    {
-        if (!draggingRoot || currentShapeData == null)
+        void TryBeginDrag()
         {
-            if (log) Debug.Log("[DragInput] EndDrag - no active drag");
-            return;
-        }
+            var hit = PickTriangleUnderMouse();
+            if (!hit) return;
 
-        if (log) Debug.Log($"[DragInput] EndDrag - attempting placement");
-
-        bool placementSuccessful = snapToBoard && SnapUtil.TrySnapToBoard(
-            draggingRoot,
-            currentShapeData.OccupiedTriangles,
-            puzzleBoard.transform,
-            puzzleBoard.Triangles,
-            draggingRoot
-        );
-
-        if (placementSuccessful)
-        {
-            puzzleBoard.OnShapePlaced();
-            if (log) Debug.Log($"[DragInput] ✅ Placement successful!");
-        }
-        else
-        {
-            if (log) Debug.Log("[DragInput] ❌ Placement failed");
-
-            if (revertIfNoSnap)
+            var root = hit.parent ? hit.parent : hit;
+            currentShapeData = root.GetComponent<ShapeData>();
+            if (currentShapeData == null)
             {
-                draggingRoot.position = dragStartPos;
+                GameLog.Info($"[DragInput] no ShapeData on {root.name}");
+                return;
             }
+
+            draggingRoot = root;
+            dragStartPos = root.position;
+
+            // Picking up an already-placed shape frees its board slots.
+            if (currentShapeData.BoardSnappedTriangles.Count > 0)
+            {
+                puzzleBoard.OnShapeRemoved();
+                currentShapeData.ResetAllSnaps();
+            }
+
+            dragOffset = MouseOnDragPlane(draggingRoot) - draggingRoot.position;
+            GameLog.Info($"[DragInput] begin drag: {draggingRoot.name}");
         }
 
-        draggingRoot = null;
-        currentShapeData = null;
-        dragFrames = 0;
-    }
-
-    Transform GetHitTransform()
-    {
-        var ray = cam.ScreenPointToRay(Input.mousePosition);
-        Transform hitTransform = null;
-
-        int count2D = Physics2D.GetRayIntersectionNonAlloc(ray, hits2D, Mathf.Infinity);
-        if (count2D > 0)
+        void ContinueDrag()
         {
-            float bestDistance = float.PositiveInfinity;
-            for (int i = 0; i < count2D; i++)
+            var mouseWorld = MouseOnDragPlane(draggingRoot);
+            draggingRoot.position = new Vector3(mouseWorld.x - dragOffset.x, mouseWorld.y - dragOffset.y, DragZ);
+        }
+
+        void EndDrag()
+        {
+            if (!draggingRoot || currentShapeData == null) return;
+
+            bool placed = snapToBoard && SnapUtil.TrySnapToBoard(
+                draggingRoot,
+                currentShapeData.OccupiedTriangles,
+                puzzleBoard.transform,
+                puzzleBoard.Triangles,
+                draggingRoot);
+
+            if (placed)
             {
-                var hit = hits2D[i];
-                if (!hit.collider) continue;
-                if (hit.distance < bestDistance)
+                puzzleBoard.OnShapePlaced();
+                GameLog.Info("[DragInput] placement ok");
+            }
+            else
+            {
+                GameLog.Info("[DragInput] placement failed");
+                if (revertIfNoSnap) draggingRoot.position = dragStartPos;
+            }
+
+            draggingRoot = null;
+            currentShapeData = null;
+        }
+
+        /// <summary>Nearest 2D collider under the cursor, or null.</summary>
+        Transform PickTriangleUnderMouse()
+        {
+            var ray = cam.ScreenPointToRay(Input.mousePosition);
+            int count = Physics2D.GetRayIntersectionNonAlloc(ray, hitBuffer, Mathf.Infinity);
+
+            Transform best = null;
+            float bestDist = float.PositiveInfinity;
+            for (int i = 0; i < count; i++)
+            {
+                var h = hitBuffer[i];
+                if (h.collider && h.distance < bestDist)
                 {
-                    bestDistance = hit.distance;
-                    hitTransform = hit.collider.transform;
+                    bestDist = h.distance;
+                    best = h.collider.transform;
                 }
             }
+            return best;
         }
-        else
+
+        /// <summary>Cursor position projected onto a camera-facing plane through <paramref name="root"/>.</summary>
+        Vector3 MouseOnDragPlane(Transform root)
         {
-            int count3D = Physics.RaycastNonAlloc(ray, hits3D, Mathf.Infinity);
-            if (count3D > 0)
+            var ray = cam.ScreenPointToRay(Input.mousePosition);
+            var plane = new Plane(-cam.transform.forward, root.position);
+
+            if (plane.Raycast(ray, out float enter))
             {
-                float bestDistance = float.PositiveInfinity;
-                for (int i = 0; i < count3D; i++)
-                {
-                    var hit = hits3D[i];
-                    if (!hit.collider) continue;
-                    if (hit.distance < bestDistance)
-                    {
-                        bestDistance = hit.distance;
-                        hitTransform = hit.collider.transform;
-                    }
-                }
+                var point = ray.GetPoint(enter);
+                point.z = root.position.z;
+                return point;
             }
+
+            float distance = Mathf.Abs(root.position.z - cam.transform.position.z);
+            var world = cam.ScreenToWorldPoint(new Vector3(Input.mousePosition.x, Input.mousePosition.y, distance));
+            world.z = root.position.z;
+            return world;
         }
-
-        return hitTransform;
-    }
-
-    Vector3 MouseOnDragPlane(Transform root)
-    {
-        var ray = cam.ScreenPointToRay(Input.mousePosition);
-        var plane = new Plane(-cam.transform.forward, root.position);
-
-        if (plane.Raycast(ray, out float enter))
-        {
-            var point = ray.GetPoint(enter);
-            point.z = root.position.z;
-            return point;
-        }
-
-        float distance = Mathf.Abs(root.position.z - cam.transform.position.z);
-        var worldPoint = cam.ScreenToWorldPoint(new Vector3(
-            Input.mousePosition.x,
-            Input.mousePosition.y,
-            distance
-        ));
-        worldPoint.z = root.position.z;
-        return worldPoint;
-    }
     }
 }
