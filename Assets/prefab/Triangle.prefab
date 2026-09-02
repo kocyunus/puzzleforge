@@ -169,3 +169,4 @@ MonoBehaviour:
   facing: 0
   posIndex: 0
   isSnapped: 0
+  ownerShapeIndex: -1
