@@ -6,7 +6,8 @@ Obj/
 Build/
 Builds/
 Logs/
-UserSettings/     # per-user editor layout / search / prefs - not shared
+# per-user editor layout / search / prefs - regenerated locally, not shared
+UserSettings/
 # NOTE: Packages/ is intentionally NOT ignored - Packages/manifest.json and
 # Packages/packages-lock.json must be committed so the project resolves the same
 # package set (incl. the Test Framework) on every machine.
