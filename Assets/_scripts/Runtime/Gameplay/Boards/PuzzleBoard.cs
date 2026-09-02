@@ -26,15 +26,18 @@ namespace Yunus.Game.Board
         [Header("UI")]
         [SerializeField] private LevelCompleteUI levelCompleteUI;
 
-        // kendi grid'i
+        // The board's own copy of the grid - the target the player fills.
         private GridBuilder solutionGrid;
 
-        // Public access
         public List<Yunus.Game.Gameplay.Triangle> Triangles => solutionGrid?.AllTriangles;
 
         public int TotalSlots => solutionGrid?.AllTriangles.Count ?? 0;
 
-        public bool IsPuzzleComplete => placedPieceCount >= totalPiecesNeeded && totalPiecesNeeded > 0;
+        /// <summary>True once every board slot has a triangle snapped onto it.</summary>
+        public bool IsPuzzleComplete =>
+            solutionGrid != null &&
+            solutionGrid.AllTriangles.Count > 0 &&
+            solutionGrid.AllTriangles.TrueForAll(t => t.isSnapped);
 
         private LevelData currentLevel;
 

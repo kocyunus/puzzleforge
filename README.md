@@ -72,7 +72,7 @@ LevelManager.Start()  ── coroutine ─────────────�
 DragTriangleParentInput  (per drag-release)
   └─ SnapUtil.TrySnapToBoard(...)  → on success PuzzleBoard.OnShapePlaced()
 
-PuzzleBoard.IsPuzzleComplete  (placedPieceCount >= shapeCount)
+PuzzleBoard.IsPuzzleComplete  (every board slot isSnapped)
   └─ LevelCompleteUI.Show()
 ```
 
@@ -87,7 +87,7 @@ PuzzleBoard.IsPuzzleComplete  (placedPieceCount >= shapeCount)
 | `PuzzleForge.Runtime` | everything under `Assets/_scripts/Runtime/` (refs `Unity.Mathematics`, `PuzzleForge.Generation.Seeding`) |
 | `PuzzleForge.Generation.Seeding` | just `SeedCellSelector` — a pure, engine-light leaf assembly so it can be unit-tested directly |
 | `PuzzleForge.Tests.EditMode` | `SeedCellSelectorTests` |
-| `PuzzleForge.Tests.PlayMode` | `ShapeGenerationTests` (drives the real `GridBuilder` / `ShapeGenerator`) |
+| `PuzzleForge.Tests.PlayMode` | `ShapeGenerationTests`, `SnapTests` (drive the real `GridBuilder` / `ShapeGenerator` / `SnapUtil`) |
 
 ### Scripts
 
@@ -212,11 +212,12 @@ to `Shapes[0]` + a warning stays as unreachable defence.)
 
 ### Determinism
 
-Generation *topology* draws only from the `System.Random` passed to `ShapeGenerator` — seed
-placement, `MovesPerTurn`, and the priority-2 tie-break. Nothing in the topology path uses
-`UnityEngine.Random`. **Same seed ⇒ byte-for-byte identical `ownerShapeIndex` across the whole
-grid.** (Shape *colour* order comes from `IColorPalette.Shuffle`, which still uses
-`UnityEngine.Random` — cosmetic only.)
+Everything the generator randomises — seed placement, `MovesPerTurn`, the priority-2
+tie-break, and `IColorPalette.Shuffle` / the HSV colour fallback — draws from the single
+`System.Random` passed to `ShapeGenerator`. Nothing in generation touches `UnityEngine.Random`.
+**Same seed ⇒ byte-for-byte identical `ownerShapeIndex` *and* colour assignment across the
+whole grid.** (Only `ShapeScatterService` — where the pieces start on screen — stays
+deliberately random; it's cosmetic and never affects the puzzle.)
 
 ### Why the puzzle is always solvable
 
@@ -232,14 +233,17 @@ placing all `shapeCount` shapes fills the board.
 Called from `DragTriangleParentInput.EndDrag`. All-or-nothing, then greedy:
 
 1. **Gate** — every triangle of the dragged shape must have a **same-`posIndex`** board slot
-   within `SNAP_DIST_WORLD_XY` (5 world units; triangle spacing is 10). Any miss → abort, the
-   shape stays where it was dropped.
+   within `SnapDistance` (5 world units; triangle spacing is 10). Any miss → abort, the shape
+   stays where it was dropped.
 2. Collect all `(shapeTri, boardTri)` pairs within the threshold, sorted nearest-first.
-3. **Greedy assign** — take the closest pair whose shape triangle and board slot are both
-   still free; no slot is double-booked.
+3. **Greedy assign** — closest pair first, no slot double-booked. If not *every* triangle gets
+   a slot, abort.
 4. Reject if any target slot is already `isSnapped`.
 5. **Commit** — move each shape triangle onto its slot's world XY, `RegisterBoardTriangle` on
    the `ShapeData`, flag both sides `isSnapped`, and `PuzzleBoard.OnShapePlaced()`.
+
+`PuzzleBoard.IsPuzzleComplete` then checks that **every board slot is `isSnapped`** (not just a
+piece count).
 
 Picking a placed shape back up (`TryBeginDrag`) calls `OnShapeRemoved` + `ResetAllSnaps`, so
 you can freely rearrange — there is no undo stack.
@@ -311,11 +315,12 @@ Unity -batchmode -runTests -testPlatform PlayMode -projectPath . -logFile -
 
 | Suite | Mode | Asserts |
 |---|---|---|
-| `SeedCellSelectorTests` (21) | EditMode | `Select(...)` returns exactly `min(shapeCount, cells)` distinct in-bounds cells for **every** `levels.json` config (regression for the lock-up), plus min-distance-when-it-fits, clamping when `shapeCount > cells`, determinism, and degenerate inputs |
-| `ShapeGenerationTests` (13) | PlayMode | for every level config (and the two that used to crash): **100% coverage**, shapes are a **disjoint partition**, `ownerShapeIndex` agrees with each shape, and a fixed seed reproduces the exact per-triangle ownership |
+| `SeedCellSelectorTests` | EditMode | `Select(...)` returns exactly `min(shapeCount, cells)` distinct in-bounds cells for **every** `levels.json` config (regression for the lock-up), plus min-distance-when-it-fits, clamping when `shapeCount > cells`, determinism, and degenerate inputs |
+| `ShapeGenerationTests` | PlayMode | for every level config (and the two that used to crash): **100% coverage**, shapes are a **disjoint partition**, `ownerShapeIndex` agrees with each shape, and a fixed seed reproduces the exact per-triangle ownership *and* colour assignment |
+| `SnapTests` | PlayMode | `SnapUtil.TrySnapToBoard`: the all-or-nothing gate, `posIndex` matching, occupied-slot rejection, and the commit (triangles moved onto slots, both sides flagged) |
 
-The PlayMode suite drives the real `GridBuilder` / `ShapeGenerator` through a minimal fake
-`IPrefabPool`.
+The PlayMode suites drive the real `GridBuilder` / `ShapeGenerator` / `SnapUtil` through a
+minimal fake `IPrefabPool` (or plain `GameObject`s).
 
 ### Logging
 
@@ -344,11 +349,9 @@ and `yield` between grid build / growth / scatter for a progress bar.
 - **No move history** — shapes can be picked up and re-placed, but there's no undo.
 - **Single player.**
 - **Legacy input** — mouse only, via the old `Input` manager (not the Input System).
-- **Colour ordering not seeded** — topology is fully reproducible from the injected
-  `System.Random`, but `IColorPalette.Shuffle` still uses `UnityEngine.Random`, so which shape
-  gets which colour varies run to run (cosmetic).
-- **Scatter is separate** — `ShapeScatterService` uses its own `System.Random`; it only
-  affects where pieces start, not the puzzle.
+- **No game feel** — snapping is instant, no tween / particles / sound.
+- **Scatter is intentionally random** — where pieces start on screen is not seeded; it's
+  cosmetic and never affects the puzzle.
 
 ---
 

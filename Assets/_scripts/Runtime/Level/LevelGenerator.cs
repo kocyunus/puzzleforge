@@ -104,7 +104,6 @@ namespace Yunus.Game.Level
         float paddingFactor = 0.15f,   // Less edge padding
         float spacingFactor = 0.40f,   // Closer to each other
         float rectScale = 0.60f,       // Shrink area slightly
-        int? seed = null,
         float z = 0f)
     {
         if (currentLevel == null || shapeGenerator == null ||
@@ -136,8 +135,7 @@ namespace Yunus.Game.Level
         {
             MinSpacing = tileSize * spacingFactor,
             RectScale = rectScale,
-            Z = z,
-            Seed = seed
+            Z = z
         };
 
         scatter.Scatter(shapeGenerator.Shapes, rect, opts);

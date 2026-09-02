@@ -1,244 +1,154 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 using Yunus.Game.Core;
 
 namespace Yunus.Game.Gameplay
 {
+    /// <summary>
+    /// Snaps a dragged shape onto the board. All-or-nothing: unless every triangle of the shape
+    /// has a free, same-<c>posIndex</c> board slot within <see cref="SnapDistance"/>, nothing moves.
+    /// Otherwise triangles are matched to slots greedily (nearest first, no slot double-booked),
+    /// moved onto their slots, and both sides flagged <c>isSnapped</c>.
+    /// </summary>
     public static class SnapUtil
-{
-    // === Ayarlar ===
-    static float SNAP_DIST_WORLD_XY = 5f;
-    const float BOARD_LOCAL_Z_ON_SNAP = -2f;
-    const bool ENFORCE_NAME_MATCH = false;
-    const bool REQUIRE_POSINDEX_MATCH = true;
-
-    static string KeyOf(GameObject go) => (go?.name ?? "").Replace("(Clone)", "").Trim().ToLowerInvariant();
-
-    // -------------------------------------------------------------------------
-    // Basit snap (cache/flag yok)
-    public static void SnapOnEndDrag(Transform endDragRoot, List<Triangle> endDragList,
-                                     Transform boardRoot, List<Triangle> boardList)
     {
-        if (!ValidateInputs(endDragRoot, endDragList, boardRoot, boardList)) return;
-        if (!GateAllWithinThreshold(endDragList, boardList)) return;
+        /// <summary>Max XY world distance from a shape triangle to its board slot (triangle spacing is 10).</summary>
+        public const float SnapDistance = 5f;
 
-        var pairs = CollectPairsWithinThreshold(endDragList, boardList);
-        var assigned = AssignGreedy(pairs);
-        if (assigned.Count == 0) return;
-        if (!AllAssignedSlotsFree(assigned)) return;
+        /// <summary>Local Z given to a triangle once it sits on the board.</summary>
+        const float BoardLocalZOnSnap = -2f;
 
-        ApplyWorldSnap(boardRoot, assigned);
-    }
-
-    // -------------------------------------------------------------------------
-    // Snap + ShapeData + Flag
-    public static bool TrySnapToBoard(Transform endDragRoot, List<Triangle> endDragList,
-                                      Transform boardRoot, List<Triangle> boardList,
-                                      Transform shapeParent,
-                                      bool setFlags = true, bool setSlotFlags = true)
-    {
-        GameLog.Info($"[SnapUtil] TrySnapToBoard STARTED - endDragList:{endDragList?.Count}, boardList:{boardList?.Count}");
-
-        if (!ValidateInputs(endDragRoot, endDragList, boardRoot, boardList))
+        readonly struct Pair
         {
-            GameLog.Info("[SnapUtil] ❌ ValidateInputs FAILED");
-            return false;
+            public readonly Triangle Item;
+            public readonly Triangle Slot;
+            public readonly float Dist;
+            public Pair(Triangle item, Triangle slot, float dist) { Item = item; Slot = slot; Dist = dist; }
         }
 
-        if (!GateAllWithinThreshold(endDragList, boardList))
+        /// <summary>
+        /// Attempts to snap <paramref name="shapeTriangles"/> onto <paramref name="boardTriangles"/>.
+        /// Returns true and commits the snap on success; returns false and leaves everything in place
+        /// otherwise.
+        /// </summary>
+        public static bool TrySnapToBoard(
+            Transform shapeRoot,
+            List<Triangle> shapeTriangles,
+            Transform boardRoot,
+            List<Triangle> boardTriangles,
+            Transform shapeParent)
         {
-            GameLog.Info("[SnapUtil] ❌ GateAllWithinThreshold FAILED");
-            return false;
-        }
+            if (!boardRoot || shapeTriangles == null || boardTriangles == null) return false;
 
-        var pairs = CollectPairsWithinThreshold(endDragList, boardList);
-        GameLog.Info($"[SnapUtil] Pairs collected: {pairs.Count}");
+            int need = 0;
+            for (int i = 0; i < shapeTriangles.Count; i++) if (shapeTriangles[i]) need++;
+            if (need == 0) return false;
 
-        var assigned = AssignGreedy(pairs);
-        GameLog.Info($"[SnapUtil] Assigned count: {assigned.Count}");
+            if (!EveryTriangleHasACandidate(shapeTriangles, boardTriangles)) return false;
 
-        if (assigned.Count == 0)
-        {
-            GameLog.Info("[SnapUtil] ❌ No assignments");
-            return false;
-        }
+            var assigned = AssignGreedy(CollectPairs(shapeTriangles, boardTriangles));
+            if (assigned.Count != need) return false;   // all-or-nothing: every triangle must land
+            if (AnyAssignedSlotOccupied(assigned)) return false;
 
-        if (!AllAssignedSlotsFree(assigned))
-        {
-            GameLog.Info("[SnapUtil] ❌ AllAssignedSlotsFree FAILED - slots already occupied");
-            return false;
-        }
-
-        ApplyWorldSnap(boardRoot, assigned);
-        GameLog.Info($"[SnapUtil] ✅ WorldSnap applied");
-
-        if (shapeParent != null)
-        {
-            var shapeData = shapeParent.GetComponent<ShapeData>();
-            if (shapeData == null)
+            var shapeData = shapeParent != null ? shapeParent.GetComponent<ShapeData>() : null;
+            if (shapeParent != null && shapeData == null)
             {
-                Debug.LogWarning($"[SnapUtil] ❌ ShapeData component not found on {shapeParent.name}");
+                Debug.LogWarning($"[SnapUtil] ShapeData not found on {shapeParent.name}; aborting snap.");
                 return false;
             }
 
-            HashSet<Triangle> itemsToFlag = setFlags ? new HashSet<Triangle>() : null;
-            HashSet<Triangle> slotsToFlag = setSlotFlags ? new HashSet<Triangle>() : null;
+            foreach (var (item, slot) in assigned)
+            {
+                MoveOntoSlot(boardRoot, item, slot);
+                item.SnapState(true);
+                slot.SnapState(true);
+                shapeData?.RegisterBoardTriangle(slot);
+            }
 
+            GameLog.Info($"[SnapUtil] snapped {assigned.Count} triangles");
+            return true;
+        }
+
+        // --- steps ---
+
+        /// <summary>Gate: every shape triangle must have at least one in-range, same-posIndex slot.</summary>
+        static bool EveryTriangleHasACandidate(List<Triangle> items, List<Triangle> slots)
+        {
+            foreach (var item in items)
+            {
+                if (!item) return false;
+
+                bool found = false;
+                Vector2 itemXY = item.transform.position;
+
+                foreach (var slot in slots)
+                {
+                    if (!slot || ReferenceEquals(item, slot) || item.posIndex != slot.posIndex) continue;
+                    if (Vector2.Distance(itemXY, (Vector2)slot.transform.position) <= SnapDistance)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found) return false;
+            }
+            return true;
+        }
+
+        static List<Pair> CollectPairs(List<Triangle> items, List<Triangle> slots)
+        {
+            var pairs = new List<Pair>(items.Count * 4);
+
+            foreach (var item in items)
+            {
+                if (!item) continue;
+                Vector2 itemXY = item.transform.position;
+
+                foreach (var slot in slots)
+                {
+                    if (!slot || ReferenceEquals(item, slot) || item.posIndex != slot.posIndex) continue;
+
+                    float d = Vector2.Distance(itemXY, (Vector2)slot.transform.position);
+                    if (d <= SnapDistance) pairs.Add(new Pair(item, slot, d));
+                }
+            }
+
+            pairs.Sort((a, b) => a.Dist.CompareTo(b.Dist));
+            return pairs;
+        }
+
+        static Dictionary<Triangle, Triangle> AssignGreedy(List<Pair> pairs)
+        {
+            var assigned = new Dictionary<Triangle, Triangle>();
+            var usedSlots = new HashSet<Triangle>();
+
+            foreach (var p in pairs)
+            {
+                if (assigned.ContainsKey(p.Item) || usedSlots.Contains(p.Slot)) continue;
+                assigned[p.Item] = p.Slot;
+                usedSlots.Add(p.Slot);
+            }
+            return assigned;
+        }
+
+        static bool AnyAssignedSlotOccupied(Dictionary<Triangle, Triangle> assigned)
+        {
             foreach (var kv in assigned)
-            {
-                var itemTri = kv.Key;
-                var slotTri = kv.Value;
-
-                if (setFlags) itemsToFlag?.Add(itemTri);
-                if (setSlotFlags) slotsToFlag?.Add(slotTri);
-
-                shapeData.RegisterBoardTriangle(slotTri);
-            }
-
-            GameLog.Info($"[SnapUtil] ✅ Registered {assigned.Count} board triangles to ShapeData");
-
-            // Call SnapState directly
-            if (setFlags && itemsToFlag != null && itemsToFlag.Count > 0)
-            {
-                foreach (var tri in itemsToFlag)
-                {
-                    if (tri != null)
-                        tri.SnapState(true);
-                }
-            }
-
-            if (setSlotFlags && slotsToFlag != null && slotsToFlag.Count > 0)
-            {
-                foreach (var tri in slotsToFlag)
-                {
-                    if (tri != null)
-                        tri.SnapState(true);
-                }
-            }
+                if (kv.Value && kv.Value.isSnapped) return true;
+            return false;
         }
 
-        GameLog.Info("[SnapUtil] ✅✅✅ TrySnapToBoard SUCCESS - returning TRUE");
-        return true;
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal flow helpers
-    static bool ValidateInputs(Transform endDragRoot, List<Triangle> endDragList,
-                               Transform boardRoot, List<Triangle> boardList)
-        => boardRoot && endDragList != null && boardList != null;
-
-    static bool GateAllWithinThreshold(List<Triangle> items, List<Triangle> slots)
-    {
-        for (int i = 0; i < items.Count; i++)
+        static void MoveOntoSlot(Transform boardRoot, Triangle item, Triangle slot)
         {
-            var item = items[i];
-            if (!item) return false;
+            if (!item || !slot) return;
 
-            Vector2 itemW = new Vector2(item.transform.position.x, item.transform.position.y);
-            float nearest = float.MaxValue;
-            Triangle nearestSlot = null;
+            Vector3 slotWorld = slot.transform.position;
+            Vector3 slotLocal = boardRoot.InverseTransformPoint(slotWorld);
+            slotLocal.z = BoardLocalZOnSnap;
+            float worldZ = boardRoot.TransformPoint(slotLocal).z;
 
-            foreach (var slot in slots)
-            {
-                if (!slot) continue;
-                if (ReferenceEquals(item, slot)) continue;
-                if (ENFORCE_NAME_MATCH && KeyOf(item.gameObject) != KeyOf(slot.gameObject)) continue;
-
-                if (REQUIRE_POSINDEX_MATCH && item.posIndex != slot.posIndex) continue;
-
-                Vector2 slotW = new Vector2(slot.transform.position.x, slot.transform.position.y);
-                float d = Vector2.Distance(itemW, slotW);
-                if (d < nearest) { nearest = d; nearestSlot = slot; }
-            }
-
-            if (!(nearestSlot != null && nearest <= SNAP_DIST_WORLD_XY))
-                return false;
+            item.transform.position = new Vector3(slotWorld.x, slotWorld.y, worldZ);
         }
-        return true;
-    }
-
-    struct Pair { public Triangle item; public Triangle slot; public float d; }
-
-    static List<Pair> CollectPairsWithinThreshold(List<Triangle> items, List<Triangle> slots)
-    {
-        var pairs = new List<Pair>(items.Count * 4);
-
-        foreach (var item in items)
-        {
-            if (!item) continue;
-            Vector2 itemW = new Vector2(item.transform.position.x, item.transform.position.y);
-
-            foreach (var slot in slots)
-            {
-                if (!slot) continue;
-                if (ReferenceEquals(item, slot)) continue;
-                if (ENFORCE_NAME_MATCH && KeyOf(item.gameObject) != KeyOf(slot.gameObject)) continue;
-
-                if (REQUIRE_POSINDEX_MATCH && item.posIndex != slot.posIndex) continue;
-
-                Vector2 slotW = new Vector2(slot.transform.position.x, slot.transform.position.y);
-                float d = Vector2.Distance(itemW, slotW);
-                if (d <= SNAP_DIST_WORLD_XY)
-                    pairs.Add(new Pair { item = item, slot = slot, d = d });
-            }
-        }
-
-        pairs.Sort((a, b) => a.d.CompareTo(b.d));
-        return pairs;
-    }
-
-    static Dictionary<Triangle, Triangle> AssignGreedy(List<Pair> pairs)
-    {
-        var assigned = new Dictionary<Triangle, Triangle>();
-        var usedSlots = new HashSet<Triangle>();
-
-        for (int i = 0; i < pairs.Count; i++)
-        {
-            var p = pairs[i];
-            if (assigned.ContainsKey(p.item)) continue;
-            if (usedSlots.Contains(p.slot)) continue;
-
-            assigned[p.item] = p.slot;
-            usedSlots.Add(p.slot);
-        }
-        return assigned;
-    }
-
-    static bool AllAssignedSlotsFree(Dictionary<Triangle, Triangle> assigned, bool log = false)
-    {
-        foreach (var kv in assigned)
-        {
-            var slotTri = kv.Value;
-            if (!slotTri) continue;
-            if (slotTri.isSnapped) return false;
-        }
-        return true;
-    }
-
-    static int ApplyWorldSnap(Transform boardRoot, Dictionary<Triangle, Triangle> assigned)
-    {
-        int snapCount = 0;
-
-        foreach (var kv in assigned)
-        {
-            var itemTri = kv.Key;
-            var slotTri = kv.Value;
-            if (!itemTri || !slotTri) continue;
-
-            Vector3 slotWorld = slotTri.transform.position;
-            Vector3 slotLocalInBoard = boardRoot.InverseTransformPoint(slotWorld);
-            slotLocalInBoard.z = BOARD_LOCAL_Z_ON_SNAP;
-            float targetWorldZ = boardRoot.TransformPoint(slotLocalInBoard).z;
-
-            itemTri.transform.position = new Vector3(slotWorld.x, slotWorld.y, targetWorldZ);
-            snapCount++;
-        }
-        return snapCount;
-    }
-
-    public static void NudgeSnap(float delta)
-    {
-        SNAP_DIST_WORLD_XY = Mathf.Max(0f, SNAP_DIST_WORLD_XY + delta);
-    }
     }
 }
